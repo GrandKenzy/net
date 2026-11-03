@@ -1,5 +1,9 @@
 # Bagron Net
 
+**Versión de net:** 1.0.0  
+**Versión compatible de Bagron:** 1.0.3  
+**Estado:** desarrollo activo
+
 Biblioteca HTTP/HTTPS y servidor estático local para Bagron.
 
 La API pública actual usa las clases `HttpClient` y `HttpServer`. Las antiguas
@@ -82,3 +86,26 @@ timeout mediante WinHTTP y Linux delega el transporte HTTPS en libcurl.
 
 - `main.bg`: servidor local estático.
 - `client.bg`: cliente que descarga desde el servidor local.
+
+## Seguridad y limitaciones
+
+- El servidor estático está destinado inicialmente a desarrollo y pruebas.
+- Sirve los archivos contenidos en la raíz configurada, pero **no comprueba
+  actualmente si un enlace simbólico o reparse point dentro de esa raíz apunta
+  fuera de ella**. Utiliza exclusivamente directorios de confianza y no
+  expongas raíces modificables por usuarios no confiables.
+- El cliente HTTP valida los esquemas completos, controla la longitud de las
+  cabeceras y comprueba errores de recepción y escritura. Las redirecciones
+  HTTP absolutas hacia HTTPS utilizan el backend TLS correspondiente.
+- En Linux, HTTPS configura límites de tiempo de conexión y de transferencia
+  en libcurl. El uso de `curl_easy_setopt` para opciones numéricas atraviesa
+  una frontera ABI variádica y requiere validación de compilación y ejecución
+  por arquitectura antes de declararse compatible con todas las plataformas.
+- Se necesitan pruebas de integración adicionales para respuestas HTTP
+  malformadas, conexiones interrumpidas y rutas con enlaces simbólicos.
+
+## Pruebas
+
+El archivo `tests/test_url.bg` incluye pruebas de regresión de esquemas URL
+y retorna `0` al superar todos los casos. Consulta [tests/README.md](tests/README.md)
+para las pruebas de cliente, servidor y transferencia.
