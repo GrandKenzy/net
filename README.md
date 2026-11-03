@@ -3,6 +3,7 @@
 **net** es una biblioteca de redes para el lenguaje de programación [Bagron](https://github.com/GrandKenzy/Bagron). Su propósito es proporcionar una interfaz nativa, clara y extensible para desarrollar aplicaciones que se comuniquen mediante redes, desde clientes TCP hasta servicios y servidores.
 
 **Versión:** 1.0.0  
+**Versión compatible de Bagron:** 1.0.3  
 **Estado:** Desarrollo activo  
 **Lenguaje:** Bagron
 
@@ -33,6 +34,8 @@ La implementación inicial se centra en las siguientes capacidades:
 Las funcionalidades disponibles pueden evolucionar durante el desarrollo de la biblioteca. Esta descripción no implica que todas las interfaces estén completas o estabilizadas.
 
 ## Compatibilidad
+
+net 1.0.0 es compatible con **Bagron 1.0.3**.
 
 El desarrollo inicial utiliza **Winsock2 en Windows**, mediante la interoperabilidad nativa de Bagron. La compatibilidad con otras plataformas y el alcance definitivo de sus API se documentarán conforme se incorporen y validen.
 
