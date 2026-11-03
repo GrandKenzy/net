@@ -233,15 +233,17 @@ private func header_content_length(header: char[], length: Len_t, size: Size_t) 
             while value_index < digit_count:
                 if value_text[value_index] < zero || value_text[value_index] > nine:
                     return -1
-                parsed = parsed * 10
                 digit_index: usize = 0
                 digit_value: int32 = 0
                 while digit_index < 10:
                     if value_text[value_index] == digits[digit_index]:
-                        parsed += digit_value
                         break
                     digit_index += 1
                     digit_value += 1
+                ; No permitir overflow de int32 en Content-Length.
+                if parsed > 214748364 || (parsed == 214748364 && digit_value > 7):
+                    return -1
+                parsed = parsed * 10 + digit_value
                 value_index += 1
             return parsed
         index += 1
@@ -300,6 +302,8 @@ private func http_get_to_file(
     if source_size != 1 || destination_size != 1 || (method != 0 && method != 1):
         return -2
 
+    ; Evitar leer una URL residual cuando una respuesta 3xx no tenga Location.
+    redirect[0] = "\0"
     colon: char = ":"
     slash: char = "/"
     question: char = "?"
@@ -544,9 +548,11 @@ private func http_get_to_file(
     while download_complete == false:
         received: int32 = net_recv(socket_handle, $read_buffer[0], 4096)
         if received < 0:
+            if response_initialized && write_body:
+                close_output(output_handle)
             net_close(socket_handle)
             net_cleanup()
-            return -9
+            return NET_RECEIVE
         if received == 0:
             break
 
@@ -587,7 +593,8 @@ private func http_get_to_file(
                 net_close(socket_handle)
                 net_cleanup()
                 if header[9] == status_three:
-                    header_location(header, redirect)
+                    if header_location(header, redirect) < 0:
+                        return NET_HEADER
                     return NET_REDIRECT
                 return NET_STATUS
             chunked = header_is_chunked(header)
@@ -792,6 +799,12 @@ public class HttpClient:
         current_url[current_length] = "\0"
         redirects: int32 = 0
         while true:
+            ; Una redireccion HTTP puede cambiar el esquema a HTTPS.
+            current_format: int32 = url_format(current_url)
+            if current_format == 1:
+                return https_get_to_file(current_url, destination, self.timeout_ms)
+            if current_format != 0:
+                return NET_REDIRECT
             result: int32 = http_get_to_file(current_url, destination, self.timeout_ms, 0, true, $redirect_url[0])
             if result != NET_REDIRECT || self.follow_redirects == false:
                 return result
