@@ -213,11 +213,13 @@ private func header_content_length(header: char[], length: Len_t, size: Size_t) 
     nul: char = "\0"
     nine: char = "9"
     digits: chain = "0123456789"
+    newline: char = "\n"
+    carriage_return: char = "\r"
     index: usize = 0
     while index + 15 <= length:
         if header[index] == nul:
             break
-        if char_to_lower(header[index]) == c && char_to_lower(header[index + 1]) == o && char_to_lower(header[index + 2]) == n && char_to_lower(header[index + 3]) == t && char_to_lower(header[index + 4]) == e && char_to_lower(header[index + 5]) == n && char_to_lower(header[index + 6]) == t && header[index + 7] == dash && char_to_lower(header[index + 8]) == l && char_to_lower(header[index + 9]) == e && char_to_lower(header[index + 10]) == n && char_to_lower(header[index + 11]) == g && char_to_lower(header[index + 12]) == t && char_to_lower(header[index + 13]) == h && header[index + 14] == colon:
+        if (index == 0 || header[index - 1] == newline) && char_to_lower(header[index]) == c && char_to_lower(header[index + 1]) == o && char_to_lower(header[index + 2]) == n && char_to_lower(header[index + 3]) == t && char_to_lower(header[index + 4]) == e && char_to_lower(header[index + 5]) == n && char_to_lower(header[index + 6]) == t && header[index + 7] == dash && char_to_lower(header[index + 8]) == l && char_to_lower(header[index + 9]) == e && char_to_lower(header[index + 10]) == n && char_to_lower(header[index + 11]) == g && char_to_lower(header[index + 12]) == t && char_to_lower(header[index + 13]) == h && header[index + 14] == colon:
             value_index: usize = index + 15
             while value_index < length && (header[value_index] == space || header[value_index] == tab):
                 value_index += 1
@@ -228,7 +230,14 @@ private func header_content_length(header: char[], length: Len_t, size: Size_t) 
                 value_index += 1
             value_text[digit_count] = "\0"
             if digit_count == 0:
-                return -1
+                return -2
+            ; Un campo malformado no se trata como longitud desconocida.
+            if value_index < length && is_digit(header[value_index]):
+                return -2
+            while value_index < length && (header[value_index] == space || header[value_index] == tab):
+                value_index += 1
+            if value_index >= length || header[value_index] != carriage_return:
+                return -2
             value_index = 0
             while value_index < digit_count:
                 if value_text[value_index] < zero || value_text[value_index] > nine:
@@ -242,7 +251,7 @@ private func header_content_length(header: char[], length: Len_t, size: Size_t) 
                     digit_value += 1
                 ; No permitir overflow de int32 en Content-Length.
                 if parsed > 214748364 || (parsed == 214748364 && digit_value > 7):
-                    return -1
+                    return -2
                 parsed = parsed * 10 + digit_value
                 value_index += 1
             return parsed
@@ -599,6 +608,10 @@ private func http_get_to_file(
                 return NET_STATUS
             chunked = header_is_chunked(header)
             body_length = header_content_length(header)
+            if body_length == -2:
+                net_close(socket_handle)
+                net_cleanup()
+                return NET_HEADER
             if write_body == false:
                 response_initialized = true
                 download_complete = true
