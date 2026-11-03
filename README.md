@@ -1,64 +1,84 @@
-# net
+# Bagron Net
 
-**net** es una biblioteca de redes para el lenguaje de programación [Bagron](https://github.com/GrandKenzy/Bagron). Su propósito es proporcionar una interfaz nativa, clara y extensible para desarrollar aplicaciones que se comuniquen mediante redes, desde clientes TCP hasta servicios y servidores.
+Biblioteca HTTP/HTTPS y servidor estático local para Bagron.
 
-**Versión:** 1.0.0  
-**Versión compatible de Bagron:** 1.0.3  
-**Estado:** Desarrollo activo  
-**Lenguaje:** Bagron
+La API pública actual usa las clases `HttpClient` y `HttpServer`. Las antiguas
+funciones globales `download()` y `serve()` ya no forman parte de esta
+biblioteca.
 
-## Descripción
+## Servidor local
 
-net busca facilitar el trabajo con conexiones de red sin renunciar al control de bajo nivel que ofrece Bagron. La biblioteca está desarrollada en Bagron y utiliza las interfaces nativas del sistema operativo para acceder a los servicios de red.
+El servidor integrado sustituye a `python -m http.server` para servir archivos
+durante las pruebas y el desarrollo:
 
-Su diseño prioriza:
+```bg
+import { HttpServer } from server
 
-- Una API coherente y sencilla para crear y administrar conexiones.
-- Acceso explícito a sockets y operaciones de envío y recepción.
-- Gestión predecible de recursos y errores.
-- Transferencia de datos por bloques, sin necesidad de cargar archivos completos en memoria.
-- Una base modular para ampliar el soporte de protocolos y plataformas.
+@unsafe
+func main() int32:
+    root: chain = "."
+    host: chain = "127.0.0.1"
+    server: HttpServer = HttpServer(
+        $root[0], 1,
+        $host[0], 9,
+        8000, 10000, 8192
+    )
+    return server.run()
+```
 
-## Funcionalidades
+`HttpServer` atiende conexiones secuenciales y acepta `GET` y `HEAD`. Devuelve
+archivos con `Content-Length`, tipos MIME básicos e `index.html` para rutas de
+directorio. Las rutas inexistentes devuelven `404` y los intentos de traversal,
+como `..` o `%2e%2e`, devuelven `403`. No hay listado de directorios ni rutas
+dinámicas. El binding admite `127.0.0.1`, `0.0.0.0`, `::1` y `::`.
 
-La implementación inicial se centra en las siguientes capacidades:
+La entrada `main.bg` de esta carpeta ya arranca este servidor en el puerto
+`8000`. El proceso permanece bloqueado hasta que se detiene externamente.
 
-| Área | Alcance |
-| --- | --- |
-| Sockets | Creación, conexión y cierre de sockets. |
-| Clientes TCP | Establecimiento de conexiones y comunicación con servicios remotos. |
-| Transferencia de datos | Envío y recepción de información mediante operaciones nativas. |
-| Gestión de errores | Consulta de errores proporcionados por la API de red del sistema. |
-| Servidores | Desarrollo de herramientas para aceptar y administrar conexiones entrantes. |
+Los resultados comunes están definidos en `result.bg`: `NET_OK`,
+`NET_INVALID_ARGUMENT`, `NET_BACKEND`, `NET_RESOLVE`, `NET_CONNECTION`,
+`NET_PROTOCOL`, `NET_STATUS`, `NET_FILE`, `NET_HEADER`, `NET_RECEIVE`,
+`NET_REDIRECT`, `NET_TIMEOUT`, `NET_LIMIT`, `NET_METHOD`, `NET_FORBIDDEN` y
+`NET_NOT_FOUND`.
 
-Las funcionalidades disponibles pueden evolucionar durante el desarrollo de la biblioteca. Esta descripción no implica que todas las interfaces estén completas o estabilizadas.
+## HTTPS
 
-## Compatibilidad
+`HttpClient` selecciona el backend según el esquema de la URL:
 
-net 1.0.0 es compatible con **Bagron 1.0.3**.
+- Windows: WinHTTP, que usa Schannel y el almacén de certificados del sistema.
+- Linux: libcurl (`libcurl.so.4`), que usa la validación TLS y el almacén de certificados del sistema.
 
-El desarrollo inicial utiliza **Winsock2 en Windows**, mediante la interoperabilidad nativa de Bagron. La compatibilidad con otras plataformas y el alcance definitivo de sus API se documentarán conforme se incorporen y validen.
+La validación de certificados permanece activa por defecto. Las conexiones con
+certificados autofirmados, expirados o cuyo hostname no coincide fallan.
 
-## Arquitectura
+En Linux el enlazador debe encontrar `libcurl.so.4`. En Debian/Ubuntu suele
+estar proporcionado por `libcurl4`; para compilar desde un entorno de desarrollo
+puede ser necesario instalar también el paquete de desarrollo de libcurl.
 
-net mantiene separadas las responsabilidades de inicialización del subsistema de red, gestión de sockets y transferencia de datos. Esta separación permite reutilizar los servicios de red entre múltiples conexiones y desarrollar abstracciones de nivel superior sin ocultar el funcionamiento de las API nativas.
+## Uso
 
-## Instalación y uso
+```bg
+import { HttpClient } from http
 
-Este repositorio está destinado al código fuente y la documentación de net. Las instrucciones de instalación, los ejemplos de uso y la referencia pública de la API se incorporarán junto con la implementación correspondiente.
+@unsafe
+func main() int32:
+    client: HttpClient = HttpClient(10000, 5, true)
+    return client.get_to_file(
+        "https://example.com/",
+        "build/example.html"
+    )
+```
 
-Para conocer el lenguaje y sus herramientas, consulta el [repositorio oficial de Bagron](https://github.com/GrandKenzy/Bagron).
+El cliente valida el esquema, aplica timeout de socket a HTTP, rechaza estados
+HTTP no exitosos y entiende respuestas `Content-Length` y `Transfer-Encoding:
+chunked`. Puede seguir redirecciones HTTP hasta `max_redirects`, y acepta
+hosts IPv4 o IPv6 entre corchetes, por ejemplo `http://[::1]:8000/main.bg`.
+Para una comprobación sin crear archivo, `HttpClient.head(url)` emite una
+petición `HEAD` HTTP y devuelve `NET_OK` cuando la respuesta es `2xx`.
+La compatibilidad de TLS permanece activa por defecto; Windows aplica el
+timeout mediante WinHTTP y Linux delega el transporte HTTPS en libcurl.
 
-## Contribuciones
+## Ejemplos
 
-Las contribuciones son bienvenidas, especialmente las relacionadas con pruebas, compatibilidad, documentación y bibliotecas de protocolos. Antes de proponer cambios, se recomienda abrir una incidencia para describir el problema o la mejora y acordar su alcance.
-
-Toda contribución de código debería incluir pruebas pertinentes y documentación de las interfaces públicas que introduzca o modifique.
-
-## Proyecto
-
-**net** forma parte del ecosistema de herramientas y bibliotecas desarrolladas para Bagron.
-
-- **Repositorio:** [GrandKenzy/net](https://github.com/GrandKenzy/net)
-- **Lenguaje:** [Bagron](https://github.com/GrandKenzy/Bagron)
-- **Versión de net:** 1.0.0
+- `main.bg`: servidor local estático.
+- `client.bg`: cliente que descarga desde el servidor local.

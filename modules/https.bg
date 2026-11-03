@@ -1,0 +1,463 @@
+; Descarga HTTPS usando el backend TLS nativo del sistema.
+; Windows usa WinHTTP/Schannel y Linux usa libcurl/OpenSSL.
+
+#if OS, "windows"
+clause System 'windows'
+#elif OS, "linux"
+clause System 'linux'
+#else
+clause System 'auto'
+#end
+
+#if ARCH, "amd"
+clause Arch 'amd'
+#elif ARCH, "x86"
+clause Arch 'x86'
+#elif ARCH, "arm"
+clause Arch 'arm'
+#elif ARCH, "riscv32"
+clause Arch 'riscv32'
+#elif ARCH, "riscv64"
+clause Arch 'riscv64'
+#else
+clause Arch 'auto'
+#end
+
+import { url_format } from url
+import {
+    NET_CONNECTION,
+    NET_FILE,
+    NET_INVALID_ARGUMENT,
+    NET_OK,
+    NET_RECEIVE,
+    NET_STATUS,
+    NET_TIMEOUT
+} from result
+import {
+    close_output,
+    open_output,
+    write_output
+} from file
+
+#if OS, "windows"
+extern windows "winhttp":
+    ; HINTERNET es un handle opaco. Se representa como usize para poder
+    ; comprobar el valor nulo sin desreferenciarlo desde Bagron.
+    WinHttpOpen(
+        user_agent *: uint16,
+        access_type: uint32,
+        proxy_name *: uint16,
+        proxy_bypass *: uint16,
+        flags_: uint32
+    ) usize
+    WinHttpSetTimeouts(
+        session: usize,
+        resolve_timeout: int32,
+        connect_timeout: int32,
+        send_timeout: int32,
+        receive_timeout: int32
+    ) int32
+    WinHttpConnect(
+        session: usize,
+        server_name *: uint16,
+        server_port: usize,
+        reserved: uint32
+    ) usize
+    WinHttpOpenRequest(
+        connection: usize,
+        verb *: uint16,
+        object_name *: uint16,
+        version *: uint16,
+        referrer *: uint16,
+        accept_types **: uint16,
+        flags_: uint32
+    ) usize
+    WinHttpSendRequest(
+        request: usize,
+        headers *: uint16,
+        headers_length: int32,
+        optional_data *: void,
+        optional_length: int32,
+        total_length: int32,
+        context: usize
+    ) int32
+    WinHttpReceiveResponse(request: usize, reserved *: void) int32
+    WinHttpQueryHeaders(
+        request: usize,
+        info_level: uint32,
+        name *: uint16,
+        buffer *: void,
+        buffer_length *: int32,
+        index *: uint32
+    ) int32
+    WinHttpQueryDataAvailable(request: usize, size *: int32) int32
+    WinHttpReadData(
+        request: usize,
+        buffer *: char,
+        bytes_to_read: int32,
+        bytes_read *: int32
+    ) int32
+    WinHttpCloseHandle(handle: usize) int32
+    MultiByteToWideChar(
+        code_page: uint32,
+        flags_: uint32,
+        source *: const char,
+        source_length: int32,
+        destination *: uint16,
+        destination_capacity: int32
+    ) int32
+
+private WINHTTP_FLAG_SECURE: const uint32 = 8388608
+private WINHTTP_QUERY_STATUS_CODE: const uint32 = 536870931
+
+@unsafe
+private func parse_windows_url(
+    source: char[],
+    source_length: Len_t,
+    source_size: Size_t,
+    host: char[],
+    host_length: Len_t,
+    host_size: Size_t,
+    path: char[],
+    path_length: Len_t,
+    path_size: Size_t,
+    port *: usize
+) bool:
+    if source_size != 1 || url_format(source) != 1:
+        return false
+
+    colon: char = ":"
+    slash: char = "/"
+    question: char = "?"
+    hash: char = "#"
+    at_sign: char = "@"
+    left_bracket: char = "["
+    right_bracket: char = "]"
+    zero: char = "0"
+    nine: char = "9"
+    nul: char = "\0"
+    one: char = "1"
+    two: char = "2"
+    three: char = "3"
+    four: char = "4"
+    five: char = "5"
+    six: char = "6"
+    seven: char = "7"
+    eight: char = "8"
+    nine_digit: char = "9"
+
+    real_length: usize = 0
+    while real_length < source_length && source[real_length] != 0:
+        real_length += 1
+
+    scheme_end: usize = 1
+    while scheme_end < real_length && source[scheme_end] != colon:
+        scheme_end += 1
+    if scheme_end + 3 >= real_length:
+        return false
+
+    authority_start: usize = scheme_end + 3
+    authority_end: usize = authority_start
+    while authority_end < real_length:
+        if source[authority_end] == slash || source[authority_end] == question || source[authority_end] == hash:
+            break
+        authority_end += 1
+
+    if authority_end == authority_start:
+        return false
+
+    port_start: usize = authority_end
+    port_value_start: usize = authority_end
+    cursor: usize = authority_start
+    host_position: usize = 0
+    if source[authority_start] == left_bracket:
+        closing_bracket: usize = authority_start + 1
+        while closing_bracket < authority_end && source[closing_bracket] != right_bracket:
+            if source[closing_bracket] == at_sign:
+                return false
+            closing_bracket += 1
+        if closing_bracket >= authority_end || closing_bracket == authority_start + 1:
+            return false
+        cursor = authority_start + 1
+        while cursor < closing_bracket:
+            if host_position + 1 >= 512:
+                return false
+            host[host_position] = source[cursor]
+            host_position += 1
+            cursor += 1
+        if closing_bracket + 1 < authority_end:
+            if source[closing_bracket + 1] != colon:
+                return false
+            port_start = closing_bracket + 1
+            port_value_start = closing_bracket + 2
+    else:
+        while cursor < authority_end:
+            if source[cursor] == at_sign:
+                return false
+            if source[cursor] == colon:
+                port_start = cursor
+                port_value_start = cursor + 1
+                break
+            cursor += 1
+        cursor = authority_start
+        while cursor < port_start:
+            if host_position + 1 >= 512:
+                return false
+            host[host_position] = source[cursor]
+            host_position += 1
+            cursor += 1
+    if host_position == 0:
+        return false
+    host[host_position] = "\0"
+
+    service: char[6] = "443"
+    if port_value_start < authority_end:
+        service_length: usize = 0
+        cursor = port_value_start
+        while cursor < authority_end:
+            if service_length >= 5 || source[cursor] < zero || source[cursor] > nine:
+                return false
+            service[service_length] = source[cursor]
+            service_length += 1
+            cursor += 1
+        if service_length == 0:
+            return false
+        service[service_length] = "\0"
+
+    parsed_port: usize = 0
+    index: usize = 0
+    while index < 5 && service[index] != nul:
+        digit: usize = 0
+        if service[index] == one:
+            digit = 1
+        elif service[index] == two:
+            digit = 2
+        elif service[index] == three:
+            digit = 3
+        elif service[index] == four:
+            digit = 4
+        elif service[index] == five:
+            digit = 5
+        elif service[index] == six:
+            digit = 6
+        elif service[index] == seven:
+            digit = 7
+        elif service[index] == eight:
+            digit = 8
+        elif service[index] == nine_digit:
+            digit = 9
+        parsed_port = parsed_port * 10 + digit
+        index += 1
+    if parsed_port == 0 || parsed_port > 65535:
+        return false
+    (port) = parsed_port
+
+    path_start: usize = authority_end
+    path_position: usize = 0
+    if path_start == real_length || source[path_start] == hash:
+        path[0] = "/"
+        path[1] = "\0"
+        return true
+
+    if source[path_start] == question:
+        path[0] = "/"
+        path_position = 1
+    cursor = path_start
+    while cursor < real_length && source[cursor] != hash:
+        if path_position + 1 >= 2048:
+            return false
+        path[path_position] = source[cursor]
+        path_position += 1
+        cursor += 1
+    path[path_position] = "\0"
+    return true
+
+@unsafe
+public func https_get_to_file(
+    source: char[],
+    source_length: Len_t,
+    source_size: Size_t,
+    destination: char[],
+    destination_length: Len_t,
+    destination_size: Size_t,
+    timeout_ms: int32
+) int32:
+    if source_size != 1 || destination_size != 1 || url_format(source) != 1:
+        return NET_INVALID_ARGUMENT
+    if timeout_ms < 1:
+        return NET_TIMEOUT
+
+    host_ascii: char[512]
+    path_ascii: char[2048]
+    host: uint16[512]
+    path: uint16[2048]
+    user_agent: uint16[32]
+    verb: uint16[8]
+    version: uint16[16]
+    port: usize = 443
+    if parse_windows_url(source, host_ascii, path_ascii, $port) == false:
+        return NET_INVALID_ARGUMENT
+
+    user_agent_ascii: char[32] = "Bagron/1.0"
+    verb_ascii: char[8] = "GET"
+    version_ascii: char[16] = "HTTP/1.1"
+    if MultiByteToWideChar(65001, 0, $user_agent_ascii[0], -1, $user_agent[0], 32) == 0:
+        return NET_CONNECTION
+    if MultiByteToWideChar(65001, 0, $verb_ascii[0], -1, $verb[0], 8) == 0:
+        return NET_CONNECTION
+    if MultiByteToWideChar(65001, 0, $version_ascii[0], -1, $version[0], 16) == 0:
+        return NET_CONNECTION
+    if MultiByteToWideChar(65001, 0, $host_ascii[0], -1, $host[0], 512) == 0:
+        return NET_CONNECTION
+    if MultiByteToWideChar(65001, 0, $path_ascii[0], -1, $path[0], 2048) == 0:
+        return NET_CONNECTION
+
+    session: usize = WinHttpOpen($user_agent[0], 0, Null, Null, 0)
+    if session == 0:
+        return NET_CONNECTION
+    if WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms) == 0:
+        WinHttpCloseHandle(session)
+        return NET_TIMEOUT
+
+    connection: usize = WinHttpConnect(session, $host[0], port, 0)
+    if connection == 0:
+        WinHttpCloseHandle(session)
+        return NET_CONNECTION
+
+    request: usize = WinHttpOpenRequest(
+        connection,
+        $verb[0],
+        $path[0],
+        $version[0],
+        Null,
+        Null,
+        WINHTTP_FLAG_SECURE
+    )
+    if request == 0:
+        WinHttpCloseHandle(connection)
+        WinHttpCloseHandle(session)
+        return NET_CONNECTION
+
+    if WinHttpSendRequest(request, Null, 0, Null, 0, 0, 0) == 0 || WinHttpReceiveResponse(request, Null) == 0:
+        WinHttpCloseHandle(request)
+        WinHttpCloseHandle(connection)
+        WinHttpCloseHandle(session)
+        return NET_RECEIVE
+
+    status: int32 = 0
+    status_length: int32 = 4
+    if WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE, Null, $status, $status_length, Null) == 0 || status < 200 || status >= 300:
+        WinHttpCloseHandle(request)
+        WinHttpCloseHandle(connection)
+        WinHttpCloseHandle(session)
+        return NET_STATUS
+
+    output_handle *: void = Null
+    if open_output($destination[0], $output_handle) == false:
+        WinHttpCloseHandle(request)
+        WinHttpCloseHandle(connection)
+        WinHttpCloseHandle(session)
+        return NET_FILE
+
+    buffer: char[8192]
+    while true:
+        available: int32 = 0
+        if WinHttpQueryDataAvailable(request, $available) == 0:
+            close_output(output_handle)
+            WinHttpCloseHandle(request)
+            WinHttpCloseHandle(connection)
+            WinHttpCloseHandle(session)
+            return NET_RECEIVE
+        if available == 0:
+            break
+        read_length: int32 = available
+        if read_length > 8192:
+            read_length = 8192
+        bytes_read: int32 = 0
+        if WinHttpReadData(request, $buffer[0], read_length, $bytes_read) == 0:
+            close_output(output_handle)
+            WinHttpCloseHandle(request)
+            WinHttpCloseHandle(connection)
+            WinHttpCloseHandle(session)
+            return NET_RECEIVE
+        if bytes_read == 0:
+            break
+        if write_output(output_handle, $buffer[0], bytes_read) == false:
+            close_output(output_handle)
+            WinHttpCloseHandle(request)
+            WinHttpCloseHandle(connection)
+            WinHttpCloseHandle(session)
+            return NET_FILE
+
+    close_output(output_handle)
+    WinHttpCloseHandle(request)
+    WinHttpCloseHandle(connection)
+    WinHttpCloseHandle(session)
+    return NET_OK
+
+#elif OS, "linux"
+extern c ":libcurl.so.4":
+    ; curl_easy_setopt es variadica en C; la firma fija conserva el ABI del
+    ; tercer argumento, que aquí siempre es un puntero.
+    curl_easy_init() *: const char
+    curl_easy_setopt(
+        handle *: const char,
+        option: int32,
+        value *: const char
+    ) int32
+    curl_easy_perform(handle *: const char) int32
+    curl_easy_getinfo(
+        handle *: const char,
+        info: int32,
+        value *: int64
+    ) int32
+    curl_easy_cleanup(handle *: const char) void
+
+extern c "c":
+    fopen(file_name *: const char, mode *: const char) *: const char
+    fclose(file *: const char) int32
+
+private CURLOPT_WRITEDATA: const int32 = 10001
+private CURLOPT_URL: const int32 = 10002
+private CURLINFO_RESPONSE_CODE: const int32 = 2097154
+
+@unsafe
+public func https_get_to_file(
+    source: char[],
+    source_length: Len_t,
+    source_size: Size_t,
+    destination: char[],
+    destination_length: Len_t,
+    destination_size: Size_t,
+    timeout_ms: int32
+) int32:
+    if source_size != 1 || destination_size != 1 || url_format(source) != 1:
+        return NET_INVALID_ARGUMENT
+    if timeout_ms < 1:
+        return NET_TIMEOUT
+
+    handle *: const char = curl_easy_init()
+    if handle == Null:
+        return NET_CONNECTION
+
+    output *: const char = fopen($destination[0], "wb")
+    if output == Null:
+        curl_easy_cleanup(handle)
+        return NET_FILE
+
+    if curl_easy_setopt(handle, CURLOPT_URL, $source[0]) != 0 || curl_easy_setopt(handle, CURLOPT_WRITEDATA, output) != 0:
+        fclose(output)
+        curl_easy_cleanup(handle)
+        return NET_CONNECTION
+
+    result: int32 = curl_easy_perform(handle)
+    status: int64 = 0
+    info_result: int32 = curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, $status)
+    fclose(output)
+    curl_easy_cleanup(handle)
+    if result != 0:
+        return NET_RECEIVE
+    if info_result != 0 || status < 200 || status >= 300:
+        return NET_STATUS
+    return NET_OK
+#end

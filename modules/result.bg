@@ -1,0 +1,41 @@
+; Resultados comunes de la biblioteca de red.
+
+#if OS, "windows"
+clause System 'windows'
+#elif OS, "linux"
+clause System 'linux'
+#else
+clause System 'auto'
+#end
+
+#if ARCH, "amd"
+clause Arch 'amd'
+#elif ARCH, "x86"
+clause Arch 'x86'
+#elif ARCH, "arm"
+clause Arch 'arm'
+#elif ARCH, "riscv32"
+clause Arch 'riscv32'
+#elif ARCH, "riscv64"
+clause Arch 'riscv64'
+#else
+clause Arch 'auto'
+#end
+
+; El contrato nuevo usa nombres semanticos en lugar de numeros dispersos.
+public NET_OK: const int32 = 0
+public NET_INVALID_ARGUMENT: const int32 = -1
+public NET_BACKEND: const int32 = -2
+public NET_RESOLVE: const int32 = -3
+public NET_CONNECTION: const int32 = -4
+public NET_PROTOCOL: const int32 = -5
+public NET_STATUS: const int32 = -6
+public NET_FILE: const int32 = -7
+public NET_HEADER: const int32 = -8
+public NET_RECEIVE: const int32 = -9
+public NET_REDIRECT: const int32 = -10
+public NET_TIMEOUT: const int32 = -11
+public NET_LIMIT: const int32 = -12
+public NET_METHOD: const int32 = -13
+public NET_FORBIDDEN: const int32 = -14
+public NET_NOT_FOUND: const int32 = -15

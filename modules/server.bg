@@ -1,0 +1,553 @@
+; Servidor HTTP estatico local. Atiende conexiones secuenciales sobre IPv4 o IPv6.
+
+#if OS, "windows"
+clause System 'windows'
+#elif OS, "linux"
+clause System 'linux'
+#else
+clause System 'auto'
+#end
+
+#if ARCH, "amd"
+clause Arch 'amd'
+#elif ARCH, "x86"
+clause Arch 'x86'
+#elif ARCH, "arm"
+clause Arch 'arm'
+#elif ARCH, "riscv32"
+clause Arch 'riscv32'
+#elif ARCH, "riscv64"
+clause Arch 'riscv64'
+#else
+clause Arch 'auto'
+#end
+
+private struct LocalAddress:
+    family: uint16
+    port: uint16
+    address: uint32
+    zero: char[8]
+
+@packed
+private struct LocalAddressV6:
+    family: uint16
+    port: uint16
+    flowinfo: uint32
+    address: byte[16]
+    scope_id: uint32
+
+import { input_size, open_input, close_input, read_input } from file
+import {
+    NET_BACKEND,
+    NET_CONNECTION,
+    NET_FILE,
+    NET_FORBIDDEN,
+    NET_INVALID_ARGUMENT,
+    NET_LIMIT,
+    NET_METHOD,
+    NET_NOT_FOUND,
+    NET_OK,
+    NET_PROTOCOL,
+    NET_TIMEOUT
+} from result
+
+#if OS, "windows"
+import {
+    AF_INET,
+    AF_INET6,
+    IPPROTO_TCP,
+    INVALID_SOCKET,
+    SOCK_STREAM,
+    accept_socket,
+    bind_socket,
+    cleanup,
+    close_socket,
+    configure_socket_timeout,
+    listen_socket,
+    open_socket,
+    recv_socket,
+    send_socket,
+    startup,
+    network_port
+} from winsock
+#elif OS, "linux"
+import {
+    AF_INET,
+    AF_INET6,
+    IPPROTO_TCP,
+    INVALID_SOCKET,
+    SOCK_STREAM,
+    accept_socket,
+    bind_socket,
+    cleanup,
+    close_socket,
+    configure_socket_timeout,
+    listen_socket,
+    open_socket,
+    recv_socket,
+    send_socket,
+    startup,
+    network_port
+} from linuxsock
+#end
+
+@unsafe
+private func append_chain(target *: char, position: int32, value: chain) int32:
+    index: usize = 0
+    cursor: int32 = position
+    while value[index] != 0:
+        if cursor >= 8191:
+            return -1
+        target[cursor] = value[index]
+        cursor += 1
+        index += 1
+    return cursor
+
+@unsafe
+private func append_uint(target *: char, position: int32, value: int32) int32:
+    digits: chain = "0123456789"
+    reversed: char[16]
+    count: usize = 0
+    number: int32 = value
+    if number == 0:
+        target[position] = "0"
+        target[position + 1] = "\0"
+        return position + 1
+    while number > 0 && count < 15:
+        digit: int32 = number % 10
+        reversed[count] = digits[digit]
+        count += 1
+        number = number / 10
+    cursor: int32 = position
+    while count > 0:
+        count -= 1
+        target[cursor] = reversed[count]
+        cursor += 1
+    target[cursor] = "\0"
+    return cursor
+
+@unsafe
+private func send_all(handle: usize, buffer *: const char, length: int32) bool:
+    sent_total: int32 = 0
+    while sent_total < length:
+        sent: int32 = send_socket(handle, $buffer[sent_total], length - sent_total)
+        if sent <= 0:
+            return false
+        sent_total += sent
+    return true
+
+@unsafe
+private func send_error(handle: usize, status: int32) void:
+    header: char[256]
+    header_length: int32 = 0
+    if status == 403:
+        header_length = append_chain($header[0], 0, "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 10\r\nConnection: close\r\n\r\n")
+        header_length = append_chain($header[0], header_length, "Forbidden\n")
+    elif status == 404:
+        header_length = append_chain($header[0], 0, "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 10\r\nConnection: close\r\n\r\n")
+        header_length = append_chain($header[0], header_length, "Not Found\n")
+    elif status == 405:
+        header_length = append_chain($header[0], 0, "HTTP/1.1 405 Method Not Allowed\r\nAllow: GET, HEAD\r\nContent-Type: text/plain\r\nContent-Length: 19\r\nConnection: close\r\n\r\n")
+        header_length = append_chain($header[0], header_length, "Method Not Allowed\n")
+    elif status == 413:
+        header_length = append_chain($header[0], 0, "HTTP/1.1 413 Payload Too Large\r\nContent-Type: text/plain\r\nContent-Length: 18\r\nConnection: close\r\n\r\n")
+        header_length = append_chain($header[0], header_length, "Request Too Large\n")
+    else:
+        header_length = append_chain($header[0], 0, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 12\r\nConnection: close\r\n\r\n")
+        header_length = append_chain($header[0], header_length, "Bad Request\n")
+    if header_length >= 0:
+        send_all(handle, $header[0], header_length)
+    return
+
+@unsafe
+private func send_file_header(handle: usize, size: int32, mime: int32) bool:
+    header: char[512]
+    header_length: int32 = append_chain($header[0], 0, "HTTP/1.1 200 OK\r\nContent-Type: ")
+    if mime == 1:
+        header_length = append_chain($header[0], header_length, "text/html; charset=utf-8")
+    elif mime == 2:
+        header_length = append_chain($header[0], header_length, "text/css; charset=utf-8")
+    elif mime == 3:
+        header_length = append_chain($header[0], header_length, "application/javascript")
+    elif mime == 4:
+        header_length = append_chain($header[0], header_length, "application/json")
+    elif mime == 5:
+        header_length = append_chain($header[0], header_length, "text/plain; charset=utf-8")
+    else:
+        header_length = append_chain($header[0], header_length, "application/octet-stream")
+    header_length = append_chain($header[0], header_length, "\r\nContent-Length: ")
+    header_length = append_uint($header[0], header_length, size)
+    header_length = append_chain($header[0], header_length, "\r\nConnection: close\r\n\r\n")
+    if header_length < 0:
+        return false
+    return send_all(handle, $header[0], header_length)
+
+@unsafe
+private func path_is_safe(path *: const char, path_length: int32) bool:
+    slash: char = "/"
+    dot: char = "."
+    backslash: char = "\\"
+    colon: char = ":"
+    percent: char = "%"
+    if path_length == 0 || path[0] != slash:
+        return false
+    segment_start: int32 = 1
+    index: int32 = 1
+    while index <= path_length:
+        if index == path_length || path[index] == slash:
+            segment_length: int32 = index - segment_start
+            if segment_length == 2 && path[segment_start] == dot && path[segment_start + 1] == dot:
+                return false
+            segment_start = index + 1
+        elif path[index] == backslash || path[index] == colon || path[index] == percent:
+            return false
+        index += 1
+    return true
+
+@unsafe
+private func content_type(path *: const char, path_length: int32) int32:
+    dot: char = "."
+    slash: char = "/"
+    h: char = "h"
+    t: char = "t"
+    m: char = "m"
+    l: char = "l"
+    c: char = "c"
+    s: char = "s"
+    j: char = "j"
+    o: char = "o"
+    n: char = "n"
+    x: char = "x"
+    index: int32 = path_length
+    while index > 0:
+        index -= 1
+        if path[index] == dot:
+            index += 1
+            break
+        if path[index] == slash:
+            return 0
+    extension_length: int32 = path_length - index
+    if extension_length == 4 && path[index] == h && path[index + 1] == t && path[index + 2] == m && path[index + 3] == l:
+        return 1
+    if extension_length == 3 && path[index] == h && path[index + 1] == t && path[index + 2] == m:
+        return 1
+    if extension_length == 3 && path[index] == c && path[index + 1] == s && path[index + 2] == s:
+        return 2
+    if extension_length == 2 && path[index] == j && path[index + 1] == s:
+        return 3
+    if extension_length == 4 && path[index] == j && path[index + 1] == s && path[index + 2] == o && path[index + 3] == n:
+        return 4
+    if extension_length == 3 && path[index] == t && path[index + 1] == x && path[index + 2] == t:
+        return 5
+    return 0
+
+@unsafe
+private func send_file(handle: usize, path *: const char, path_length: int32, include_body: bool) void:
+#if OS, "windows"
+    file_handle *: void = Null
+#elif OS, "linux"
+    file_handle: usize = 4294967295
+#end
+    if open_input(path, $file_handle) == false:
+        send_error(handle, 404)
+        return
+    size: int32 = input_size(file_handle)
+    if size < 0:
+        close_input(file_handle)
+        send_error(handle, 403)
+        return
+    if send_file_header(handle, size, content_type(path, path_length)) == false:
+        close_input(file_handle)
+        return
+    if include_body == false:
+        close_input(file_handle)
+        return
+    buffer: char[4096]
+    remaining: int32 = size
+    while remaining > 0:
+        chunk: int32 = remaining
+        if chunk > 4096:
+            chunk = 4096
+        read: int32 = read_input(file_handle, $buffer[0], chunk)
+        if read <= 0:
+            break
+        if send_all(handle, $buffer[0], read) == false:
+            break
+        remaining -= read
+    close_input(file_handle)
+    return
+
+@unsafe
+private func serve_client(directory *: const char, directory_length: usize, handle: usize, max_request_bytes: int32) void:
+    carriage_return: char = "\r"
+    newline: char = "\n"
+    space: char = " "
+    get_g: char = "G"
+    get_e: char = "E"
+    get_t: char = "T"
+    get_a: char = "A"
+    get_d: char = "D"
+    http_h: char = "H"
+    http_t: char = "T"
+    http_p: char = "P"
+    request: char[8192]
+    request_length: int32 = 0
+    request_limit: int32 = max_request_bytes
+    if request_limit < 256 || request_limit > 8191:
+        request_limit = 8192
+    header_ready: bool = false
+    while request_length < request_limit - 1 && header_ready == false:
+        received: int32 = recv_socket(handle, $request[request_length], request_limit - 1 - request_length)
+        if received <= 0:
+            return
+        request_length += received
+        index: int32 = 3
+        while index < request_length:
+            if request[index - 3] == carriage_return && request[index - 2] == newline && request[index - 1] == carriage_return && request[index] == newline:
+                header_ready = true
+                break
+            index += 1
+    if header_ready == false:
+        send_error(handle, 413)
+        return
+    if request_length < 5:
+        send_error(handle, 400)
+        return
+    is_get: bool = request[0] == get_g && request[1] == get_e && request[2] == get_t && request[3] == space
+    is_head: bool = request[0] == http_h && request[1] == get_e && request[2] == get_a && request[3] == get_d && request[4] == space
+    if is_get == false && is_head == false:
+        send_error(handle, 405)
+        return
+    if (is_get && request_length < 14) || (is_head && request_length < 15):
+        send_error(handle, 400)
+        return
+    path_end: int32 = 5
+    if is_get:
+        path_end = 4
+    while path_end < request_length && request[path_end] != space:
+        path_end += 1
+    if path_end >= request_length || path_end == 4 || path_end + 5 >= request_length:
+        send_error(handle, 400)
+        return
+    if request[path_end + 1] != http_h || request[path_end + 2] != http_t || request[path_end + 3] != http_t || request[path_end + 4] != http_p:
+        send_error(handle, 400)
+        return
+    path_offset: int32 = 5
+    if is_get:
+        path_offset = 4
+    path_length: int32 = path_end - path_offset
+    if path_length <= 0 || path_length >= 2047:
+        send_error(handle, 400)
+        return
+    if path_is_safe($request[path_offset], path_length) == false:
+        send_error(handle, 403)
+        return
+    path: char[2048]
+    path_index: int32 = 0
+    while path_index < path_length:
+        path[path_index] = request[path_index + path_offset]
+        path_index += 1
+    path[path_length] = "\0"
+    slash_path: char = "/"
+    if path_length == 1 || path[path_length - 1] == slash_path:
+        if path_length + 10 >= 2048:
+            send_error(handle, 400)
+            return
+        path[path_length] = "i"
+        path[path_length + 1] = "n"
+        path[path_length + 2] = "d"
+        path[path_length + 3] = "e"
+        path[path_length + 4] = "x"
+        path[path_length + 5] = "."
+        path[path_length + 6] = "h"
+        path[path_length + 7] = "t"
+        path[path_length + 8] = "m"
+        path[path_length + 9] = "l"
+        path[path_length + 10] = "\0"
+        path_length += 10
+    full_path: char[4096]
+    full_length: int32 = 0
+    directory_index: usize = 0
+    slash: char = "/"
+    backslash: char = "\\"
+    zero: char = "\0"
+    question: char = "?"
+    hash: char = "#"
+    while directory_index < directory_length && directory[directory_index] != zero:
+        if full_length >= 4094:
+            send_error(handle, 400)
+            return
+        full_path[full_length] = directory[directory_index]
+        full_length += 1
+        directory_index += 1
+    if full_length == 0:
+        send_error(handle, 400)
+        return
+    if full_path[full_length - 1] != slash && full_path[full_length - 1] != backslash:
+        full_path[full_length] = slash
+        full_length += 1
+    path_index = 1
+    while path_index < path_length && path[path_index] != zero && path[path_index] != question && path[path_index] != hash:
+        if full_length >= 4094:
+            send_error(handle, 400)
+            return
+        full_path[full_length] = path[path_index]
+        full_length += 1
+        path_index += 1
+    full_path[full_length] = "\0"
+    send_file(handle, $full_path[0], full_length, is_head == false)
+    return
+
+@unsafe
+private func bind_address(host *: const char, length: usize) uint32:
+    one: char = "1"
+    two: char = "2"
+    seven: char = "7"
+    zero: char = "0"
+    dot: char = "."
+    if length == 9 && host[0] == one && host[1] == two && host[2] == seven && host[3] == dot && host[4] == zero && host[5] == dot && host[6] == zero && host[7] == dot && host[8] == one:
+        return 16777343
+    if length == 7 && host[0] == zero && host[1] == dot && host[2] == zero && host[3] == dot && host[4] == zero && host[5] == dot && host[6] == zero:
+        return 0
+    return 4294967295
+
+@unsafe
+private func is_ipv6_loopback(host *: const char, length: usize) bool:
+    colon: char = ":"
+    one: char = "1"
+    return length == 3 && host[0] == colon && host[1] == colon && host[2] == one
+
+@unsafe
+private func is_ipv6_any(host *: const char, length: usize) bool:
+    colon: char = ":"
+    return length == 2 && host[0] == colon && host[1] == colon
+
+@unsafe
+private func open_listener(server *: HttpServer) usize:
+    if startup() != 0:
+        return INVALID_SOCKET
+    server_socket: usize = INVALID_SOCKET
+    if is_ipv6_any((server).bind_host, (server).bind_host_length) || is_ipv6_loopback((server).bind_host, (server).bind_host_length):
+        local_address_v6: LocalAddressV6
+        local_address_v6.family = AF_INET6
+        local_address_v6.port = network_port((server).port)
+        local_address_v6.flowinfo = 0
+        index: usize = 0
+        while index < 16:
+            local_address_v6.address[index] = "\0"
+            index += 1
+        if is_ipv6_loopback((server).bind_host, (server).bind_host_length):
+            local_address_v6.address[15] = 1
+        local_address_v6.scope_id = 0
+        server_socket = open_socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP)
+        if server_socket == INVALID_SOCKET:
+            cleanup()
+            return INVALID_SOCKET
+        if bind_socket(server_socket, $local_address_v6, 28) != 0 || listen_socket(server_socket, 16) != 0:
+            close_socket(server_socket)
+            cleanup()
+            return INVALID_SOCKET
+        return server_socket
+
+    local_address: LocalAddress
+    local_address.family = AF_INET
+    local_address.port = network_port((server).port)
+    local_address.address = bind_address((server).bind_host, (server).bind_host_length)
+    if local_address.address == 4294967295:
+        cleanup()
+        return INVALID_SOCKET
+    local_address.zero[0] = "\0"
+    local_address.zero[1] = "\0"
+    local_address.zero[2] = "\0"
+    local_address.zero[3] = "\0"
+    local_address.zero[4] = "\0"
+    local_address.zero[5] = "\0"
+    local_address.zero[6] = "\0"
+    local_address.zero[7] = "\0"
+    server_socket = open_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+    if server_socket == INVALID_SOCKET:
+        cleanup()
+        return INVALID_SOCKET
+    if bind_socket(server_socket, $local_address, 16) != 0 || listen_socket(server_socket, 16) != 0:
+        close_socket(server_socket)
+        cleanup()
+        return INVALID_SOCKET
+    return server_socket
+
+public class HttpServer:
+    @unsafe
+    func __init__(
+        root *: const char,
+        root_length: usize,
+        bind_host *: const char,
+        bind_host_length: usize,
+        port: int32,
+        timeout_ms: int32,
+        max_request_bytes: int32
+    ) void:
+        self.root = root
+        self.root_length = root_length
+        self.bind_host = bind_host
+        self.bind_host_length = bind_host_length
+        self.port = port
+        self.timeout_ms = timeout_ms
+        self.max_request_bytes = max_request_bytes
+        self.closed = false
+
+    @unsafe
+    func run_once() int32:
+        if self.root_length == 0 || self.bind_host_length == 0 || self.port < 1 || self.port > 65535 || self.timeout_ms < 1 || self.max_request_bytes < 256 || self.max_request_bytes > 8192:
+            return NET_INVALID_ARGUMENT
+        listener: usize = open_listener($self)
+        if listener == INVALID_SOCKET:
+            return NET_BACKEND
+        client: usize = accept_socket(listener)
+        if client == INVALID_SOCKET:
+            close_socket(listener)
+            cleanup()
+            return NET_CONNECTION
+        if configure_socket_timeout(client, self.timeout_ms) != 0:
+            close_socket(client)
+            close_socket(listener)
+            cleanup()
+            return NET_TIMEOUT
+        serve_client(self.root, self.root_length, client, self.max_request_bytes)
+        close_socket(client)
+        close_socket(listener)
+        cleanup()
+        return NET_OK
+
+    @unsafe
+    func run() int32:
+        if self.root_length == 0 || self.bind_host_length == 0 || self.port < 1 || self.port > 65535 || self.timeout_ms < 1 || self.max_request_bytes < 256 || self.max_request_bytes > 8192:
+            return NET_INVALID_ARGUMENT
+        listener: usize = open_listener($self)
+        if listener == INVALID_SOCKET:
+            return NET_BACKEND
+        self.closed = false
+        while self.closed == false:
+            client: usize = accept_socket(listener)
+            if client == INVALID_SOCKET:
+                close_socket(listener)
+                cleanup()
+                return NET_CONNECTION
+            if configure_socket_timeout(client, self.timeout_ms) != 0:
+                close_socket(client)
+                close_socket(listener)
+                cleanup()
+                return NET_TIMEOUT
+            serve_client(self.root, self.root_length, client, self.max_request_bytes)
+            close_socket(client)
+        close_socket(listener)
+        cleanup()
+        return NET_OK
+
+    @unsafe
+    func close() void:
+        self.closed = true
+        return
+
+    @unsafe
+    func __deletion__() void:
+        self.close()
+        return

@@ -1,0 +1,103 @@
+; Validación básica de URLs absolutas.
+
+#if OS, "windows"
+clause System 'windows'
+#elif OS, "linux"
+clause System 'linux'
+#else
+clause System 'auto'
+#end
+
+#if ARCH, "amd"
+clause Arch 'amd'
+#elif ARCH, "x86"
+clause Arch 'x86'
+#elif ARCH, "arm"
+clause Arch 'arm'
+#elif ARCH, "riscv32"
+clause Arch 'riscv32'
+#elif ARCH, "riscv64"
+clause Arch 'riscv64'
+#else
+clause Arch 'auto'
+#end
+
+import { char_to_lower, is_alpha, is_alphanumeric } from string
+
+@unsafe
+public inline func is_url(text: char[], length: Len_t, size: Size_t) bool:
+    ; Acepta URLs absolutas con esquema y autoridad, por ejemplo https://host.
+    if size != 1 || length == 0:
+        return false
+
+    space: char = " "
+    colon: char = ":"
+    slash: char = "/"
+    question: char = "?"
+    hash: char = "#"
+    plus: char = "+"
+    hyphen: char = "-"
+    dot: char = "."
+
+    real_length: usize = 0
+    while real_length < length && text[real_length] != 0:
+        input_character: char = text[real_length]
+        if input_character <= space:
+            return false
+        real_length += 1
+
+    ; El esquema debe comenzar con una letra y terminar en ':'.
+    if real_length < 4 || is_alpha(text[0]) == false:
+        return false
+
+    scheme_end: usize = 1
+    while scheme_end < real_length && text[scheme_end] != colon:
+        scheme_character: char = text[scheme_end]
+        if is_alphanumeric(scheme_character) == false && scheme_character != plus && scheme_character != hyphen && scheme_character != dot:
+            return false
+        scheme_end += 1
+
+    ; Exige el separador de autoridad // y al menos un carácter de autoridad.
+    if scheme_end == real_length || scheme_end + 3 >= real_length:
+        return false
+    if text[scheme_end + 1] != slash || text[scheme_end + 2] != slash:
+        return false
+
+    authority_start: usize = scheme_end + 3
+    authority_end: usize = authority_start
+    while authority_end < real_length:
+        authority_character: char = text[authority_end]
+        if authority_character == slash || authority_character == question || authority_character == hash:
+            break
+        authority_end += 1
+
+    if authority_end == authority_start:
+        return false
+
+    return true
+
+@unsafe
+public inline func url_format(text: char[], length: Len_t, size: Size_t) int32:
+    ; Devuelve 0=http, 1=https, 2=ftp y -1 si no es un formato soportado.
+    if is_url(text) == false:
+        return -1
+
+    h: char = "h"
+    t: char = "t"
+    p: char = "p"
+    s: char = "s"
+    f: char = "f"
+
+    first: char = char_to_lower(text[0])
+    second: char = char_to_lower(text[1])
+    third: char = char_to_lower(text[2])
+
+    if first == h && second == t && third == t && char_to_lower(text[3]) == p:
+        if char_to_lower(text[4]) == s:
+            return 1
+        return 0
+
+    if first == f && second == t && third == p:
+        return 2
+
+    return -1

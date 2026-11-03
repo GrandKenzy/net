@@ -1,0 +1,198 @@
+; Lectura y escritura de archivos para los backends HTTP.
+; Mantiene el ABI nativo fuera de http.bg y https.bg.
+
+#if OS, "windows"
+clause System 'windows'
+#elif OS, "linux"
+clause System 'linux'
+#else
+clause System 'auto'
+#end
+
+#if ARCH, "amd"
+clause Arch 'amd'
+#elif ARCH, "x86"
+clause Arch 'x86'
+#elif ARCH, "arm"
+clause Arch 'arm'
+#elif ARCH, "riscv32"
+clause Arch 'riscv32'
+#elif ARCH, "riscv64"
+clause Arch 'riscv64'
+#else
+clause Arch 'auto'
+#end
+
+#if OS, "windows"
+extern windows "kernel32":
+    CreateFileA(
+        file_name *: const char,
+        desired_access: uint32,
+        share_mode: uint32,
+        security_attributes *: void,
+        creation_disposition: uint32,
+        flags_and_attributes: uint32,
+        template_file *: void
+    ) *: void
+    WriteFile(
+        handle *: void,
+        buffer *: const char,
+        bytes: int32,
+        written *: int32,
+        overlapped *: void
+    ) int32
+    ReadFile(
+        handle *: void,
+        buffer *: char,
+        bytes: int32,
+        read *: int32,
+        overlapped *: void
+    ) int32
+    CloseHandle(handle *: void) int32
+    GetFileType(handle *: void) uint32
+    GetFileSize(handle *: void, high *: void) int32
+
+@unsafe
+public func open_output(file_name *: const char, result **: void) bool:
+    handle *: void = CreateFileA(
+        file_name,
+        1073741824,
+        3,
+        Null,
+        2,
+        128,
+        Null
+    )
+    if GetFileType(handle) != 1:
+        return false
+    (result) = handle
+    return true
+
+@unsafe
+public func open_input(file_name *: const char, result **: void) bool:
+    handle *: void = CreateFileA(
+        file_name,
+        2147483648,
+        3,
+        Null,
+        3,
+        128,
+        Null
+    )
+    if GetFileType(handle) != 1:
+        return false
+    (result) = handle
+    return true
+
+@unsafe
+public func input_size(handle *: void) int32:
+    low: int32 = GetFileSize(handle, Null)
+    if low < 0:
+        return -1
+    return low
+
+@unsafe
+public func read_input(handle *: void, buffer *: char, count: int32) int32:
+    if count < 0:
+        return -1
+    read: int32 = 0
+    if ReadFile(handle, buffer, count, $read, Null) == 0:
+        return -1
+    return read
+
+@unsafe
+public func write_output(handle *: void, buffer *: const char, count: int32) bool:
+    if count < 0:
+        return false
+    written: int32 = 0
+    result: int32 = WriteFile(
+        handle,
+        buffer,
+        count,
+        $written,
+        Null
+    )
+    return result != 0 && written == count
+
+@unsafe
+public func close_output(handle *: void) void:
+    CloseHandle(handle)
+    return
+
+@unsafe
+public func close_input(handle *: void) void:
+    CloseHandle(handle)
+    return
+
+#elif OS, "linux"
+import { close_socket } from linuxsock
+
+extern c "c":
+    open(
+        file_name *: const char,
+        open_flags: int32,
+        mode: uint32
+    ) usize
+    write(
+        file_descriptor: usize,
+        buffer *: const char,
+        count: int32
+    ) isize
+    read(
+        file_descriptor: usize,
+        buffer *: char,
+        count: int32
+    ) isize
+    lseek(
+        file_descriptor: usize,
+        offset: isize,
+        whence: int32
+    ) isize
+
+@unsafe
+public func open_output(file_name *: const char, result *: usize) bool:
+    handle: usize = open(file_name, 577, 420)
+    if handle == 4294967295:
+        return false
+    (result) = handle
+    return true
+
+@unsafe
+public func open_input(file_name *: const char, result *: usize) bool:
+    handle: usize = open(file_name, 0, 0)
+    if handle == 4294967295:
+        return false
+    (result) = handle
+    return true
+
+@unsafe
+public func input_size(handle: usize) int32:
+    end: isize = lseek(handle, 0, 2)
+    if end < 0 || end > 2147483647:
+        return -1
+    lseek(handle, 0, 0)
+    return end
+
+@unsafe
+public func read_input(handle: usize, buffer *: char, count: int32) int32:
+    if count < 0:
+        return -1
+    return read(handle, buffer, count)
+
+@unsafe
+public func write_output(handle: usize, buffer *: const char, count: int32) bool:
+    if count < 0:
+        return false
+    written: isize = write(handle, buffer, count)
+    return written == count
+
+@unsafe
+public func close_output(handle: usize) void:
+    close_socket(handle)
+    return
+
+@unsafe
+public func close_input(handle: usize) void:
+    close_socket(handle)
+    return
+#end

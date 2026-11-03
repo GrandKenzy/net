@@ -1,0 +1,271 @@
+
+clause System "windows"
+clause Arch "amd"
+clause Privacy "public"
+
+public SOCKET_ERROR: const int32 = -1
+public INVALID_SOCKET: const usize = 18446744073709551615
+public WINSOCK_VERSION: const uint16 = 514
+
+; Vista común de addrinfo para consumidores de red. Windows coloca
+; ai_canonname antes de ai_addr en la estructura nativa.
+@align(8)
+public struct ADDRINFO:
+    ai_flags: int32
+    ai_family: int32
+    ai_socktype: int32
+    ai_protocol: int32
+    ai_addrlen: int32
+    ai_canonname *: const char
+    ai_addr *: const char
+    ai_next *: ADDRINFO
+
+; Estructura WSADATA para Windows AMD64.
+; Tamaño ABI esperado: 408 bytes, alineación 8.
+
+@align(8)
+public struct WSADATA:
+    wVersion: uint16
+    wHighVersion: uint16
+    iMaxSockets: uint16
+    iMaxUdpDg: uint16
+    lpVendorInfo *: char
+    szDescription: char[257]
+    szSystemStatus: char[129]
+
+
+extern windows "ws2_32":
+
+    WSAStartup(
+        wVersionRequired: uint16,
+        lpWSAData *: WSADATA
+    ) int32
+
+    WSACleanup() int32
+
+    socket(
+        af: int32,
+        kind: int32,
+        protocol: int32
+    ) usize
+
+    WSAGetLastError() int32
+
+    connect(
+        sock: usize,
+        data *: const char,
+        length: int32
+    ) int32
+    bind(
+        sock: usize,
+        data *: void,
+        length: int32
+    ) int32
+    listen(sock: usize, backlog: int32) int32
+    accept(
+        sock: usize,
+        data *: char,
+        length *: int32
+    ) usize
+    setsockopt(
+        sock: usize,
+        level: int32,
+        option: int32,
+        value *: void,
+        value_length: int32
+    ) int32
+
+    send(
+        sock: usize,
+        buf *: const char,
+        len: int32,
+        flags_: int32
+    ) int32
+
+    recv(
+        sock: usize,
+        buf *: char,
+        len: int32,
+        flags_: int32
+    ) int32
+
+    closesocket(sock: usize) int32
+
+    getaddrinfo(
+        node *: const char,
+        service *: const char,
+        hints *: ADDRINFO,
+        result **: ADDRINFO
+    ) int32
+
+    freeaddrinfo(result *: ADDRINFO) void
+    htons(port: int32) uint16
+
+
+; Inicialización global de Winsock.
+; Debe ejecutarse antes de crear sockets.
+
+
+public AF_INET: const int32 = 2
+public AF_INET6: const int32 = 23
+public SOCK_STREAM: const int32 = 1
+public IPPROTO_TCP: const int32 = 6
+
+; Adaptadores compartidos por el cliente HTTP y por futuros protocolos.
+@unsafe
+public func open_socket(family: int32, kind: int32, protocol: int32) usize:
+    return socket(family, kind, protocol)
+
+@unsafe
+public func connect_socket(handle: usize, address *: const char, length: int32) int32:
+    return connect(handle, address, length)
+
+@unsafe
+public func bind_socket(handle: usize, address *: void, length: int32) int32:
+    return bind(handle, address, length)
+
+@unsafe
+public func listen_socket(handle: usize, backlog: int32) int32:
+    return listen(handle, backlog)
+
+@unsafe
+public func accept_socket(handle: usize) usize:
+    return accept(handle, Null, Null)
+
+@unsafe
+public func configure_socket_timeout(handle: usize, timeout_ms: int32) int32:
+    if timeout_ms < 1:
+        return -1
+    receive_option: int32 = 4102
+    send_option: int32 = 4101
+    socket_level: int32 = 65535
+    receive_result: int32 = setsockopt(handle, socket_level, receive_option, $timeout_ms, 4)
+    send_result: int32 = setsockopt(handle, socket_level, send_option, $timeout_ms, 4)
+    if receive_result != 0 || send_result != 0:
+        return -1
+    return 0
+
+@unsafe
+public func send_socket(handle: usize, buffer *: const char, length: int32) int32:
+    return send(handle, buffer, length, 0)
+
+@unsafe
+public func recv_socket(handle: usize, buffer *: char, length: int32) int32:
+    return recv(handle, buffer, length, 0)
+
+@unsafe
+public func close_socket(handle: usize) int32:
+    return closesocket(handle)
+
+@unsafe
+public func resolve(
+    node *: const char,
+    service *: const char,
+    hints *: ADDRINFO,
+    result **: ADDRINFO
+) int32:
+    return getaddrinfo(node, service, hints, result)
+
+@unsafe
+public func release_addrinfo(result *: ADDRINFO) void:
+    freeaddrinfo(result)
+    return
+
+@unsafe
+public func startup() int32:
+    data: WSADATA
+    result: int32 = WSAStartup(WINSOCK_VERSION, $data)
+
+    if result != 0:
+        return result
+
+    if data.wVersion != WINSOCK_VERSION:
+        WSACleanup()
+        return SOCKET_ERROR
+
+    return 0
+
+
+; Llamar cuando ya no se utilice Winsock.
+
+@unsafe
+public func cleanup() int32:
+    return WSACleanup()
+
+@unsafe
+public func network_port(port: int32) uint16:
+    return htons(port)
+
+
+public class Socket:
+
+    func __init__(
+        sock: usize,
+        addr *: const char,
+        addrlen: int32
+    ) void:
+        self.sock = sock
+        self.addr = addr
+        self.addrlen = addrlen
+        self.closed = false
+
+
+    @unsafe
+    func connect() int32:
+        if self.closed:
+            return SOCKET_ERROR
+
+        if self.sock == INVALID_SOCKET:
+            return SOCKET_ERROR
+
+        result: int32 = connect_socket(self.sock, self.addr, self.addrlen)
+
+        return result
+
+
+    @unsafe
+    func send(buf *: const char, len: int32) int32:
+        if self.closed:
+            return SOCKET_ERROR
+
+        if self.sock == INVALID_SOCKET:
+            return SOCKET_ERROR
+
+        result: int32 = send_socket(self.sock, buf, len)
+
+        return result
+
+
+    @unsafe
+    func recv(buf *: char, len: int32) int32:
+        if self.closed:
+            return SOCKET_ERROR
+
+        if self.sock == INVALID_SOCKET:
+            return SOCKET_ERROR
+
+        result: int32 = recv_socket(self.sock, buf, len)
+
+        return result
+
+
+    @unsafe
+    func close() int32:
+        if self.closed:
+            return 0
+
+        if self.sock == INVALID_SOCKET:
+            self.closed = true
+            return SOCKET_ERROR
+
+        result: int32 = close_socket(self.sock)
+
+        self.closed = true
+        self.sock = 0
+        return 0
+
+
+    @unsafe
+    func __deletion__() void:
+        self.close()
+        return
