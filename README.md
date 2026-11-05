@@ -8,15 +8,15 @@ Librería de red para el lenguaje Bagron. Incluye un cliente HTTP/HTTPS y un ser
 
 ## ¿Qué incluye?
 
-- HttpClient: cliente HTTP/HTTPS con soporte para GET y HEAD
-- HttpServer: servidor local estático
-- Validación de certificados TLS activa por defecto
-- Códigos de resultado del módulo como NET_OK, NET_TIMEOUT y NET_NOT_FOUND
+- `HttpClient`: cliente HTTP/HTTPS con soporte para GET y HEAD.
+- `HttpServer`: servidor local estático.
+- Validación de certificados TLS activa por defecto.
+- Códigos de resultado del módulo como `NET_OK`, `NET_TIMEOUT` y `NET_NOT_FOUND`.
 
 ## Requisitos
 
-- Bagron compatible con la versión 1.0.3
-- En Linux: libcurl.so.4 debe estar disponible para HTTPS
+- Bagron compatible con la versión 1.0.3.
+- En Linux, `libcurl.so.4` debe estar disponible para HTTPS.
 
 ## Uso rápido
 
@@ -35,3 +35,33 @@ func main() int32:
         8000, 10000, 8192
     )
     return server.run()
+```
+
+### Cliente HTTP/HTTPS
+
+```bg
+import { HttpClient } from http
+
+@unsafe
+func main() int32:
+    client: HttpClient = HttpClient(10000, 5, true)
+    return client.get_to_file(
+        "https://example.com/",
+        "build/example.html"
+    )
+```
+
+## Seguridad y limitaciones
+
+- Este proyecto está diseñado principalmente para desarrollo local.
+- No se recomienda exponer directorios modificables por usuarios no confiables.
+- La validación TLS permanece activa por defecto.
+- El servidor todavía no comprueba si un enlace simbólico o reparse point dentro de la raíz apunta fuera de ella. Utiliza únicamente directorios de confianza.
+
+## Proyecto relacionado
+
+- [Bagron](https://github.com/GrandKenzy/Bagron): lenguaje para el que está hecha esta librería.
+
+## Pruebas
+
+Consulta [tests/README.md](tests/README.md) para ver las pruebas de regresión y las comprobaciones del cliente y el servidor.
