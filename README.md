@@ -1,19 +1,36 @@
 # Bagron Net
 
-**Versión de net:** 1.0.0  
-**Versión compatible de Bagron:** 1.0.3  
-**Estado:** desarrollo activo
+Librería de red para el lenguaje Bagron. Proporciona un cliente HTTP/HTTPS y un servidor estático local para desarrollo y pruebas.
 
-Biblioteca HTTP/HTTPS y servidor estático local para Bagron.
+- Versión de net: 1.0.0
+- Versión compatible de Bagron: 1.0.3
+- Estado: desarrollo activo
 
-La API pública actual usa las clases `HttpClient` y `HttpServer`. Las antiguas
-funciones globales `download()` y `serve()` ya no forman parte de esta
-biblioteca.
+## ¿Qué incluye?
 
-## Servidor local
+- `HttpClient`: cliente HTTP/HTTPS con soporte para GET/HEAD, redirecciones, validación de TLS y manejo de cabeceras.
+- `HttpServer`: servidor local estático para servir contenido desde un directorio raíz.
+- Soporte para `http://` y `https://` con validación de certificados activa por defecto.
+- Manejo de errores con códigos de resultado del módulo (`NET_OK`, `NET_TIMEOUT`, `NET_NOT_FOUND`, etc.).
 
-El servidor integrado sustituye a `python -m http.server` para servir archivos
-durante las pruebas y el desarrollo:
+## Requisitos
+
+- Compilador o runtime de Bagron compatible con la versión 1.0.3.
+- En Linux, `libcurl.so.4` debe estar disponible para HTTPS.
+- En Debian/Ubuntu, normalmente se resuelve instalando `libcurl4` y, si es necesario, el paquete de desarrollo `libcurl4-openssl-dev`.
+
+## Instalación
+
+Este repositorio se usa como librería del lenguaje Bagron, importando los módulos que expone el proyecto.
+
+```bg
+import { HttpClient } from http
+import { HttpServer } from server
+```
+
+## Uso rápido
+
+### Servidor estático local
 
 ```bg
 import { HttpServer } from server
@@ -30,36 +47,16 @@ func main() int32:
     return server.run()
 ```
 
-`HttpServer` atiende conexiones secuenciales y acepta `GET` y `HEAD`. Devuelve
-archivos con `Content-Length`, tipos MIME básicos e `index.html` para rutas de
-directorio. Las rutas inexistentes devuelven `404` y los intentos de traversal,
-como `..` o `%2e%2e`, devuelven `403`. No hay listado de directorios ni rutas
-dinámicas. El binding admite `127.0.0.1`, `0.0.0.0`, `::1` y `::`.
+`HttpServer` sirve archivos locales desde una raíz configurada, ofrece `GET` y `HEAD`, devuelve `Content-Length`, emplea tipos MIME básicos y gestionará `index.html` en rutas de directorio.
 
-La entrada `main.bg` de esta carpeta ya arranca este servidor en el puerto
-`8000`. El proceso permanece bloqueado hasta que se detiene externamente.
+- Ruta inexistente: `404`
+- Intento de traversal (`..`, `%2e%2e`): `403`
+- No ofrece listado de directorios ni rutas dinámicas
+- Soporta `127.0.0.1`, `0.0.0.0`, `::1` y `::`
 
-Los resultados comunes están definidos en `result.bg`: `NET_OK`,
-`NET_INVALID_ARGUMENT`, `NET_BACKEND`, `NET_RESOLVE`, `NET_CONNECTION`,
-`NET_PROTOCOL`, `NET_STATUS`, `NET_FILE`, `NET_HEADER`, `NET_RECEIVE`,
-`NET_REDIRECT`, `NET_TIMEOUT`, `NET_LIMIT`, `NET_METHOD`, `NET_FORBIDDEN` y
-`NET_NOT_FOUND`.
+El archivo `main.bg` del repositorio arranca el servidor en el puerto `8000`.
 
-## HTTPS
-
-`HttpClient` selecciona el backend según el esquema de la URL:
-
-- Windows: WinHTTP, que usa Schannel y el almacén de certificados del sistema.
-- Linux: libcurl (`libcurl.so.4`), que usa la validación TLS y el almacén de certificados del sistema.
-
-La validación de certificados permanece activa por defecto. Las conexiones con
-certificados autofirmados, expirados o cuyo hostname no coincide fallan.
-
-En Linux el enlazador debe encontrar `libcurl.so.4`. En Debian/Ubuntu suele
-estar proporcionado por `libcurl4`; para compilar desde un entorno de desarrollo
-puede ser necesario instalar también el paquete de desarrollo de libcurl.
-
-## Uso
+### Cliente HTTP/HTTPS
 
 ```bg
 import { HttpClient } from http
@@ -73,39 +70,62 @@ func main() int32:
     )
 ```
 
-El cliente valida el esquema, aplica timeout de socket a HTTP, rechaza estados
-HTTP no exitosos y entiende respuestas `Content-Length` y `Transfer-Encoding:
-chunked`. Puede seguir redirecciones HTTP hasta `max_redirects`, y acepta
-hosts IPv4 o IPv6 entre corchetes, por ejemplo `http://[::1]:8000/main.bg`.
-Para una comprobación sin crear archivo, `HttpClient.head(url)` emite una
-petición `HEAD` HTTP y devuelve `NET_OK` cuando la respuesta es `2xx`.
-La compatibilidad de TLS permanece activa por defecto; Windows aplica el
-timeout mediante WinHTTP y Linux delega el transporte HTTPS en libcurl.
+El cliente:
 
-## Ejemplos
+- valida el esquema de la URL;
+- aplica timeout de conexión y transferencia;
+- rechaza estados HTTP no exitosos;
+- entiende `Content-Length` y `Transfer-Encoding: chunked`;
+- sigue redirecciones HTTP hasta un máximo configurable;
+- acepta hosts IPv4 e IPv6 con formato estándar, como `http://[::1]:8000/main.bg`.
 
-- `main.bg`: servidor local estático.
-- `client.bg`: cliente que descarga desde el servidor local.
+También dispone de `HttpClient.head(url)`, útil para comprobar si un recurso responde correctamente sin guardar el archivo en disco.
+
+## HTTPS y TLS
+
+`HttpClient` selecciona el backend según el esquema de la URL:
+
+- Windows: WinHTTP, con Schannel y el almacén de certificados del sistema.
+- Linux: libcurl (`libcurl.so.4`), con validación TLS y almacenamiento del sistema.
+
+La validación de certificados permanece activa por defecto. Certificados autofirmados, caducados o con hostname incorrecto fallarán.
 
 ## Seguridad y limitaciones
 
-- El servidor estático está destinado inicialmente a desarrollo y pruebas.
-- Sirve los archivos contenidos en la raíz configurada, pero **no comprueba
-  actualmente si un enlace simbólico o reparse point dentro de esa raíz apunta
-  fuera de ella**. Utiliza exclusivamente directorios de confianza y no
-  expongas raíces modificables por usuarios no confiables.
-- El cliente HTTP valida los esquemas completos, controla la longitud de las
-  cabeceras y comprueba errores de recepción y escritura. Las redirecciones
-  HTTP absolutas hacia HTTPS utilizan el backend TLS correspondiente.
-- En Linux, HTTPS configura límites de tiempo de conexión y de transferencia
-  en libcurl. El uso de `curl_easy_setopt` para opciones numéricas atraviesa
-  una frontera ABI variádica y requiere validación de compilación y ejecución
-  por arquitectura antes de declararse compatible con todas las plataformas.
-- Se necesitan pruebas de integración adicionales para respuestas HTTP
-  malformadas, conexiones interrumpidas y rutas con enlaces simbólicos.
+Este proyecto está pensado principalmente para desarrollo y pruebas locales.
+
+- El servidor estático sirve únicamente el contenido de la raíz configurada.
+- Se debe usar únicamente con directorios de confianza.
+- No se recomienda exponer directorios modificables por usuarios no confiables.
+- La validación de rutas y el control de acceso se deben evaluar con cuidado cuando se emplea en entornos no seguros.
+- En Linux, la capa HTTPS depende de libcurl y debe probarse en cada arquitectura objetivo antes de asumir compatibilidad total.
+
+## Estructura del repositorio
+
+- `main.bg`: ejemplo de servidor local.
+- `client.bg`: ejemplo de cliente HTTP.
+- `modules/`: módulos del proyecto.
+- `tests/`: pruebas de regresión y validación.
+- `README.md`: documentación principal.
+- `CHANGELOG.md`: historial de cambios.
 
 ## Pruebas
 
-El archivo `tests/test_url.bg` incluye pruebas de regresión de esquemas URL
-y retorna `0` al superar todos los casos. Consulta [tests/README.md](tests/README.md)
-para las pruebas de cliente, servidor y transferencia.
+El repositorio incluye pruebas de regresión bajo `tests/`.
+
+Consulta [tests/README.md](tests/README.md) para ver:
+
+- pruebas de URL y esquemas;
+- validaciones de cliente y servidor;
+- casos de robustez y redirecciones;
+- comprobaciones específicas de HTTP/HTTPS.
+
+## Proyecto relacionado
+
+- [Bagron](https://github.com/GrandKenzy/Bagron): lenguaje base del que esta librería depende.
+
+## Estado actual
+
+La API pública actual usa las clases `HttpClient` y `HttpServer`. Las funciones globales antiguas `download()` y `serve()` ya no forman parte de esta biblioteca.
+
+Si quieres colaborar, prueba el cliente y el servidor con archivos locales, revisa los casos de regresión y comparte cualquier error o mejora que encuentres.
