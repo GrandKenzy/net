@@ -36,7 +36,7 @@ private struct LocalAddressV6:
     address: byte[16]
     scope_id: uint32
 
-import { input_size, open_input, close_input, read_input } from file
+import { input_size, open_input, close_input, read_input, open_input_beneath } from file
 import {
     NET_BACKEND,
     NET_CONNECTION,
@@ -204,15 +204,22 @@ private func content_type(path *: const char, path_length: int32) int32:
     return 0
 
 @unsafe
-private func send_file(handle: usize, path *: const char, path_length: int32, include_body: bool) void:
+private func send_file(handle: usize, root *: const char, relative *: const char, path *: const char, path_length: int32, include_body: bool) void:
 #if OS, "windows"
     file_handle *: void = Null
 #elif OS, "linux"
     file_handle: usize = 4294967295
 #end
+#if OS, "linux"
+    open_status: int32 = open_input_beneath(root, relative, $file_handle)
+    if open_status != 0:
+        send_error(handle, open_status)
+        return
+#elif OS, "windows"
     if open_input(path, $file_handle) == false:
         send_error(handle, 404)
         return
+#end
     size: int32 = input_size(file_handle)
     if size < 0:
         close_input(file_handle)
@@ -348,6 +355,7 @@ private func serve_client(directory *: const char, directory_length: usize, hand
     if full_path[full_length - 1] != slash && full_path[full_length - 1] != backslash:
         full_path[full_length] = slash
         full_length += 1
+    relative_start: int32 = full_length
     path_index = 1
     while path_index < path_length && path[path_index] != zero && path[path_index] != question && path[path_index] != hash:
         if full_length >= 4094:
@@ -357,7 +365,7 @@ private func serve_client(directory *: const char, directory_length: usize, hand
         full_length += 1
         path_index += 1
     full_path[full_length] = "\0"
-    send_file(handle, $full_path[0], full_length, is_head == false)
+    send_file(handle, directory, $full_path[relative_start], $full_path[0], full_length, is_head == false)
     return
 
 @unsafe
