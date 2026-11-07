@@ -28,6 +28,7 @@ import {
     NET_CONNECTION,
     NET_FILE,
     NET_INVALID_ARGUMENT,
+    NET_LIMIT,
     NET_OK,
     NET_RECEIVE,
     NET_STATUS,
@@ -214,11 +215,12 @@ public func https_get_to_file(
     destination: char[],
     destination_length: Len_t,
     destination_size: Size_t,
-    timeout_ms: int32
+    timeout_ms: int32,
+    max_body_bytes: int32
 ) int32:
     if source_size != 1 || destination_size != 1 || url_format(source) != 1:
         return NET_INVALID_ARGUMENT
-    if timeout_ms < 1:
+    if timeout_ms < 1 || max_body_bytes < 1:
         return NET_TIMEOUT
 
     host_ascii: char[512]
@@ -294,6 +296,8 @@ public func https_get_to_file(
         return NET_FILE
 
     buffer: char[8192]
+    total_received: int64 = 0
+    max_bytes: int64 = max_body_bytes
     while true:
         available: int32 = 0
         if Platform.WinHttpQueryDataAvailable(request, $available) == 0:
@@ -316,6 +320,13 @@ public func https_get_to_file(
             return NET_RECEIVE
         if bytes_read == 0:
             break
+        total_received += bytes_read
+        if total_received > max_bytes:
+            close_output(output_handle)
+            Platform.WinHttpCloseHandle(request)
+            Platform.WinHttpCloseHandle(connection)
+            Platform.WinHttpCloseHandle(session)
+            return NET_LIMIT
         if write_output(output_handle, $buffer[0], bytes_read) == false:
             close_output(output_handle)
             Platform.WinHttpCloseHandle(request)
@@ -336,6 +347,7 @@ private CURLOPT_URL: const int32 = 10002
 private CURLOPT_NOSIGNAL: const int32 = 99
 private CURLOPT_TIMEOUT_MS: const int32 = 155
 private CURLOPT_CONNECTTIMEOUT_MS: const int32 = 156
+private CURLOPT_MAXFILESIZE: const int32 = 114
 private CURLINFO_RESPONSE_CODE: const int32 = 2097154
 
 ; libcurl espera un C long en las opciones numericas de curl_easy_setopt.
@@ -362,11 +374,12 @@ public func https_get_to_file(
     destination: char[],
     destination_length: Len_t,
     destination_size: Size_t,
-    timeout_ms: int32
+    timeout_ms: int32,
+    max_body_bytes: int32
 ) int32:
     if source_size != 1 || destination_size != 1 || url_format(source) != 1:
         return NET_INVALID_ARGUMENT
-    if timeout_ms < 1:
+    if timeout_ms < 1 || max_body_bytes < 1:
         return NET_TIMEOUT
 
     handle: usize = Platform.curl_easy_init()
@@ -380,7 +393,7 @@ public func https_get_to_file(
 
     output_arg: CurlLongArgument
     output_arg.unsigned = output
-    if Platform.curl_easy_setopt(handle, CURLOPT_URL, $source[0]) != 0 || Platform.curl_easy_setopt(handle, CURLOPT_WRITEDATA, output_arg.pointer) != 0 || curl_set_long(handle, CURLOPT_NOSIGNAL, 1) != 0 || curl_set_long(handle, CURLOPT_TIMEOUT_MS, timeout_ms) != 0 || curl_set_long(handle, CURLOPT_CONNECTTIMEOUT_MS, timeout_ms) != 0:
+    if Platform.curl_easy_setopt(handle, CURLOPT_URL, $source[0]) != 0 || Platform.curl_easy_setopt(handle, CURLOPT_WRITEDATA, output_arg.pointer) != 0 || curl_set_long(handle, CURLOPT_NOSIGNAL, 1) != 0 || curl_set_long(handle, CURLOPT_TIMEOUT_MS, timeout_ms) != 0 || curl_set_long(handle, CURLOPT_CONNECTTIMEOUT_MS, timeout_ms) != 0 || curl_set_long(handle, CURLOPT_MAXFILESIZE, max_body_bytes) != 0:
         Platform.fclose(output)
         Platform.curl_easy_cleanup(handle)
         return NET_CONNECTION
@@ -392,6 +405,8 @@ public func https_get_to_file(
     Platform.curl_easy_cleanup(handle)
     if result == 28:
         return NET_TIMEOUT
+    if result == 63:
+        return NET_LIMIT
     if result != 0:
         return NET_RECEIVE
     if close_result != 0:
