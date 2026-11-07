@@ -51,45 +51,7 @@ import {
     NET_TIMEOUT
 } from result
 
-#if OS, "windows"
-import {
-    AF_INET,
-    AF_INET6,
-    IPPROTO_TCP,
-    INVALID_SOCKET,
-    SOCK_STREAM,
-    accept_socket,
-    bind_socket,
-    cleanup,
-    close_socket,
-    configure_socket_timeout,
-    listen_socket,
-    open_socket,
-    recv_socket,
-    send_socket,
-    startup,
-    network_port
-} from winsock
-#elif OS, "linux"
-import {
-    AF_INET,
-    AF_INET6,
-    IPPROTO_TCP,
-    INVALID_SOCKET,
-    SOCK_STREAM,
-    accept_socket,
-    bind_socket,
-    cleanup,
-    close_socket,
-    configure_socket_timeout,
-    listen_socket,
-    open_socket,
-    recv_socket,
-    send_socket,
-    startup,
-    network_port
-} from linuxsock
-#end
+; Sockets, DNS and timeouts use the canonical platform library.
 
 @unsafe
 private func append_chain(target *: char, position: int32, value: chain) int32:
@@ -130,7 +92,7 @@ private func append_uint(target *: char, position: int32, value: int32) int32:
 private func send_all(handle: usize, buffer *: const char, length: int32) bool:
     sent_total: int32 = 0
     while sent_total < length:
-        sent: int32 = send_socket(handle, $buffer[sent_total], length - sent_total)
+        sent: int32 = Platform.Send(handle, $buffer[sent_total], length - sent_total)
         if sent <= 0:
             return false
         sent_total += sent
@@ -297,7 +259,7 @@ private func serve_client(directory *: const char, directory_length: usize, hand
         request_limit = 8192
     header_ready: bool = false
     while request_length < request_limit - 1 && header_ready == false:
-        received: int32 = recv_socket(handle, $request[request_length], request_limit - 1 - request_length)
+        received: int32 = Platform.Recv(handle, $request[request_length], request_limit - 1 - request_length)
         if received <= 0:
             return
         request_length += received
@@ -424,13 +386,13 @@ private func is_ipv6_any(host *: const char, length: usize) bool:
 
 @unsafe
 private func open_listener(server *: HttpServer) usize:
-    if startup() != 0:
-        return INVALID_SOCKET
-    server_socket: usize = INVALID_SOCKET
+    if Platform.Startup() != 0:
+        return Platform.INVALID_SOCKET
+    server_socket: usize = Platform.INVALID_SOCKET
     if is_ipv6_any((server).bind_host, (server).bind_host_length) || is_ipv6_loopback((server).bind_host, (server).bind_host_length):
         local_address_v6: LocalAddressV6
-        local_address_v6.family = AF_INET6
-        local_address_v6.port = network_port((server).port)
+        local_address_v6.family = Platform.AF_INET6
+        local_address_v6.port = Platform.NetworkPort((server).port)
         local_address_v6.flowinfo = 0
         index: usize = 0
         while index < 16:
@@ -439,23 +401,23 @@ private func open_listener(server *: HttpServer) usize:
         if is_ipv6_loopback((server).bind_host, (server).bind_host_length):
             local_address_v6.address[15] = 1
         local_address_v6.scope_id = 0
-        server_socket = open_socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP)
-        if server_socket == INVALID_SOCKET:
-            cleanup()
-            return INVALID_SOCKET
-        if bind_socket(server_socket, $local_address_v6, 28) != 0 || listen_socket(server_socket, 16) != 0:
-            close_socket(server_socket)
-            cleanup()
-            return INVALID_SOCKET
+        server_socket = Platform.Open(Platform.AF_INET6, Platform.SOCK_STREAM, Platform.IPPROTO_TCP)
+        if server_socket == Platform.INVALID_SOCKET:
+            Platform.Cleanup()
+            return Platform.INVALID_SOCKET
+        if Platform.Bind(server_socket, $local_address_v6, 28) != 0 || Platform.Listen(server_socket, 16) != 0:
+            Platform.Close(server_socket)
+            Platform.Cleanup()
+            return Platform.INVALID_SOCKET
         return server_socket
 
     local_address: LocalAddress
-    local_address.family = AF_INET
-    local_address.port = network_port((server).port)
+    local_address.family = Platform.AF_INET
+    local_address.port = Platform.NetworkPort((server).port)
     local_address.address = bind_address((server).bind_host, (server).bind_host_length)
     if local_address.address == 4294967295:
-        cleanup()
-        return INVALID_SOCKET
+        Platform.Cleanup()
+        return Platform.INVALID_SOCKET
     local_address.zero[0] = "\0"
     local_address.zero[1] = "\0"
     local_address.zero[2] = "\0"
@@ -464,14 +426,14 @@ private func open_listener(server *: HttpServer) usize:
     local_address.zero[5] = "\0"
     local_address.zero[6] = "\0"
     local_address.zero[7] = "\0"
-    server_socket = open_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
-    if server_socket == INVALID_SOCKET:
-        cleanup()
-        return INVALID_SOCKET
-    if bind_socket(server_socket, $local_address, 16) != 0 || listen_socket(server_socket, 16) != 0:
-        close_socket(server_socket)
-        cleanup()
-        return INVALID_SOCKET
+    server_socket = Platform.Open(Platform.AF_INET, Platform.SOCK_STREAM, Platform.IPPROTO_TCP)
+    if server_socket == Platform.INVALID_SOCKET:
+        Platform.Cleanup()
+        return Platform.INVALID_SOCKET
+    if Platform.Bind(server_socket, $local_address, 16) != 0 || Platform.Listen(server_socket, 16) != 0:
+        Platform.Close(server_socket)
+        Platform.Cleanup()
+        return Platform.INVALID_SOCKET
     return server_socket
 
 public class HttpServer:
@@ -499,22 +461,22 @@ public class HttpServer:
         if self.root_length == 0 || self.bind_host_length == 0 || self.port < 1 || self.port > 65535 || self.timeout_ms < 1 || self.max_request_bytes < 256 || self.max_request_bytes > 8192:
             return NET_INVALID_ARGUMENT
         listener: usize = open_listener($self)
-        if listener == INVALID_SOCKET:
+        if listener == Platform.INVALID_SOCKET:
             return NET_BACKEND
-        client: usize = accept_socket(listener)
-        if client == INVALID_SOCKET:
-            close_socket(listener)
-            cleanup()
+        client: usize = Platform.Accept(listener, Null, Null)
+        if client == Platform.INVALID_SOCKET:
+            Platform.Close(listener)
+            Platform.Cleanup()
             return NET_CONNECTION
-        if configure_socket_timeout(client, self.timeout_ms) != 0:
-            close_socket(client)
-            close_socket(listener)
-            cleanup()
+        if Platform.set_timeout(client, self.timeout_ms) != 0:
+            Platform.Close(client)
+            Platform.Close(listener)
+            Platform.Cleanup()
             return NET_TIMEOUT
         serve_client(self.root, self.root_length, client, self.max_request_bytes)
-        close_socket(client)
-        close_socket(listener)
-        cleanup()
+        Platform.Close(client)
+        Platform.Close(listener)
+        Platform.Cleanup()
         return NET_OK
 
     @unsafe
@@ -522,24 +484,24 @@ public class HttpServer:
         if self.root_length == 0 || self.bind_host_length == 0 || self.port < 1 || self.port > 65535 || self.timeout_ms < 1 || self.max_request_bytes < 256 || self.max_request_bytes > 8192:
             return NET_INVALID_ARGUMENT
         listener: usize = open_listener($self)
-        if listener == INVALID_SOCKET:
+        if listener == Platform.INVALID_SOCKET:
             return NET_BACKEND
         self.closed = false
         while self.closed == false:
-            client: usize = accept_socket(listener)
-            if client == INVALID_SOCKET:
-                close_socket(listener)
-                cleanup()
+            client: usize = Platform.Accept(listener)
+            if client == Platform.INVALID_SOCKET:
+                Platform.Close(listener)
+                Platform.Cleanup()
                 return NET_CONNECTION
-            if configure_socket_timeout(client, self.timeout_ms) != 0:
-                close_socket(client)
-                close_socket(listener)
-                cleanup()
+            if Platform.set_timeout(client, self.timeout_ms) != 0:
+                Platform.Close(client)
+                Platform.Close(listener)
+                Platform.Cleanup()
                 return NET_TIMEOUT
             serve_client(self.root, self.root_length, client, self.max_request_bytes)
-            close_socket(client)
-        close_socket(listener)
-        cleanup()
+            Platform.Close(client)
+        Platform.Close(listener)
+        Platform.Cleanup()
         return NET_OK
 
     @unsafe
