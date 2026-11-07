@@ -40,73 +40,7 @@ import {
 } from file
 
 #if OS, "windows"
-extern windows "winhttp":
-    ; HINTERNET es un handle opaco. Se representa como usize para poder
-    ; comprobar el valor nulo sin desreferenciarlo desde Bagron.
-    WinHttpOpen(
-        user_agent *: uint16,
-        access_type: uint32,
-        proxy_name *: uint16,
-        proxy_bypass *: uint16,
-        flags_: uint32
-    ) usize
-    WinHttpSetTimeouts(
-        session: usize,
-        resolve_timeout: int32,
-        connect_timeout: int32,
-        send_timeout: int32,
-        receive_timeout: int32
-    ) int32
-    WinHttpConnect(
-        session: usize,
-        server_name *: uint16,
-        server_port: usize,
-        reserved: uint32
-    ) usize
-    WinHttpOpenRequest(
-        connection: usize,
-        verb *: uint16,
-        object_name *: uint16,
-        version *: uint16,
-        referrer *: uint16,
-        accept_types **: uint16,
-        flags_: uint32
-    ) usize
-    WinHttpSendRequest(
-        request: usize,
-        headers *: uint16,
-        headers_length: int32,
-        optional_data *: void,
-        optional_length: int32,
-        total_length: int32,
-        context: usize
-    ) int32
-    WinHttpReceiveResponse(request: usize, reserved *: void) int32
-    WinHttpQueryHeaders(
-        request: usize,
-        info_level: uint32,
-        name *: uint16,
-        buffer *: void,
-        buffer_length *: int32,
-        index *: uint32
-    ) int32
-    WinHttpQueryDataAvailable(request: usize, size *: int32) int32
-    WinHttpReadData(
-        request: usize,
-        buffer *: char,
-        bytes_to_read: int32,
-        bytes_read *: int32
-    ) int32
-    WinHttpCloseHandle(handle: usize) int32
-    MultiByteToWideChar(
-        code_page: uint32,
-        flags_: uint32,
-        source *: const char,
-        source_length: int32,
-        destination *: uint16,
-        destination_capacity: int32
-    ) int32
-
+; WinHTTP and Unicode conversion come from the windows platform library.
 private WINHTTP_FLAG_SECURE: const uint32 = 8388608
 private WINHTTP_QUERY_STATUS_CODE: const uint32 = 536870931
 
@@ -301,30 +235,30 @@ public func https_get_to_file(
     user_agent_ascii: char[32] = "Bagron/1.0"
     verb_ascii: char[8] = "GET"
     version_ascii: char[16] = "HTTP/1.1"
-    if MultiByteToWideChar(65001, 0, $user_agent_ascii[0], -1, $user_agent[0], 32) == 0:
+    if Platform.MultiByteToWideChar(65001, 0, $user_agent_ascii[0], -1, $user_agent[0], 32) == 0:
         return NET_CONNECTION
-    if MultiByteToWideChar(65001, 0, $verb_ascii[0], -1, $verb[0], 8) == 0:
+    if Platform.MultiByteToWideChar(65001, 0, $verb_ascii[0], -1, $verb[0], 8) == 0:
         return NET_CONNECTION
-    if MultiByteToWideChar(65001, 0, $version_ascii[0], -1, $version[0], 16) == 0:
+    if Platform.MultiByteToWideChar(65001, 0, $version_ascii[0], -1, $version[0], 16) == 0:
         return NET_CONNECTION
-    if MultiByteToWideChar(65001, 0, $host_ascii[0], -1, $host[0], 512) == 0:
+    if Platform.MultiByteToWideChar(65001, 0, $host_ascii[0], -1, $host[0], 512) == 0:
         return NET_CONNECTION
-    if MultiByteToWideChar(65001, 0, $path_ascii[0], -1, $path[0], 2048) == 0:
+    if Platform.MultiByteToWideChar(65001, 0, $path_ascii[0], -1, $path[0], 2048) == 0:
         return NET_CONNECTION
 
-    session: usize = WinHttpOpen($user_agent[0], 0, Null, Null, 0)
+    session: usize = Platform.WinHttpOpen($user_agent[0], 0, Null, Null, 0)
     if session == 0:
         return NET_CONNECTION
-    if WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms) == 0:
-        WinHttpCloseHandle(session)
+    if Platform.WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms) == 0:
+        Platform.WinHttpCloseHandle(session)
         return NET_TIMEOUT
 
-    connection: usize = WinHttpConnect(session, $host[0], port, 0)
+    connection: usize = Platform.WinHttpConnect(session, $host[0], port, 0)
     if connection == 0:
-        WinHttpCloseHandle(session)
+        Platform.WinHttpCloseHandle(session)
         return NET_CONNECTION
 
-    request: usize = WinHttpOpenRequest(
+    request: usize = Platform.WinHttpOpenRequest(
         connection,
         $verb[0],
         $path[0],
@@ -334,39 +268,39 @@ public func https_get_to_file(
         WINHTTP_FLAG_SECURE
     )
     if request == 0:
-        WinHttpCloseHandle(connection)
-        WinHttpCloseHandle(session)
+        Platform.WinHttpCloseHandle(connection)
+        Platform.WinHttpCloseHandle(session)
         return NET_CONNECTION
 
-    if WinHttpSendRequest(request, Null, 0, Null, 0, 0, 0) == 0 || WinHttpReceiveResponse(request, Null) == 0:
-        WinHttpCloseHandle(request)
-        WinHttpCloseHandle(connection)
-        WinHttpCloseHandle(session)
+    if Platform.WinHttpSendRequest(request, Null, 0, Null, 0, 0, 0) == 0 || Platform.WinHttpReceiveResponse(request, Null) == 0:
+        Platform.WinHttpCloseHandle(request)
+        Platform.WinHttpCloseHandle(connection)
+        Platform.WinHttpCloseHandle(session)
         return NET_RECEIVE
 
     status: int32 = 0
     status_length: int32 = 4
-    if WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE, Null, $status, $status_length, Null) == 0 || status < 200 || status >= 300:
-        WinHttpCloseHandle(request)
-        WinHttpCloseHandle(connection)
-        WinHttpCloseHandle(session)
+    if Platform.WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE, Null, $status, $status_length, Null) == 0 || status < 200 || status >= 300:
+        Platform.WinHttpCloseHandle(request)
+        Platform.WinHttpCloseHandle(connection)
+        Platform.WinHttpCloseHandle(session)
         return NET_STATUS
 
     output_handle *: void = Null
     if open_output($destination[0], $output_handle) == false:
-        WinHttpCloseHandle(request)
-        WinHttpCloseHandle(connection)
-        WinHttpCloseHandle(session)
+        Platform.WinHttpCloseHandle(request)
+        Platform.WinHttpCloseHandle(connection)
+        Platform.WinHttpCloseHandle(session)
         return NET_FILE
 
     buffer: char[8192]
     while true:
         available: int32 = 0
-        if WinHttpQueryDataAvailable(request, $available) == 0:
+        if Platform.WinHttpQueryDataAvailable(request, $available) == 0:
             close_output(output_handle)
-            WinHttpCloseHandle(request)
-            WinHttpCloseHandle(connection)
-            WinHttpCloseHandle(session)
+            Platform.WinHttpCloseHandle(request)
+            Platform.WinHttpCloseHandle(connection)
+            Platform.WinHttpCloseHandle(session)
             return NET_RECEIVE
         if available == 0:
             break
@@ -374,49 +308,29 @@ public func https_get_to_file(
         if read_length > 8192:
             read_length = 8192
         bytes_read: int32 = 0
-        if WinHttpReadData(request, $buffer[0], read_length, $bytes_read) == 0:
+        if Platform.WinHttpReadData(request, $buffer[0], read_length, $bytes_read) == 0:
             close_output(output_handle)
-            WinHttpCloseHandle(request)
-            WinHttpCloseHandle(connection)
-            WinHttpCloseHandle(session)
+            Platform.WinHttpCloseHandle(request)
+            Platform.WinHttpCloseHandle(connection)
+            Platform.WinHttpCloseHandle(session)
             return NET_RECEIVE
         if bytes_read == 0:
             break
         if write_output(output_handle, $buffer[0], bytes_read) == false:
             close_output(output_handle)
-            WinHttpCloseHandle(request)
-            WinHttpCloseHandle(connection)
-            WinHttpCloseHandle(session)
+            Platform.WinHttpCloseHandle(request)
+            Platform.WinHttpCloseHandle(connection)
+            Platform.WinHttpCloseHandle(session)
             return NET_FILE
 
     close_output(output_handle)
-    WinHttpCloseHandle(request)
-    WinHttpCloseHandle(connection)
-    WinHttpCloseHandle(session)
+    Platform.WinHttpCloseHandle(request)
+    Platform.WinHttpCloseHandle(connection)
+    Platform.WinHttpCloseHandle(session)
     return NET_OK
 
 #elif OS, "linux"
-extern c ":libcurl.so.4":
-    ; curl_easy_setopt es variadica en C; la firma fija conserva el ABI del
-    ; tercer argumento, que aquí siempre es un puntero.
-    curl_easy_init() *: const char
-    curl_easy_setopt(
-        handle *: const char,
-        option: int32,
-        value *: const char
-    ) int32
-    curl_easy_perform(handle *: const char) int32
-    curl_easy_getinfo(
-        handle *: const char,
-        info: int32,
-        value *: int64
-    ) int32
-    curl_easy_cleanup(handle *: const char) void
-
-extern c "c":
-    fopen(file_name *: const char, mode *: const char) *: const char
-    fclose(file *: const char) int32
-
+; libcurl and libc declarations come from the gnulibrary platform layer.
 private CURLOPT_WRITEDATA: const int32 = 10001
 private CURLOPT_URL: const int32 = 10002
 private CURLOPT_NOSIGNAL: const int32 = 99
@@ -430,13 +344,14 @@ private CURLINFO_RESPONSE_CODE: const int32 = 2097154
 ; Esta vista nunca se desreferencia como puntero.
 private mold CurlLongArgument:
     value: isize
+    unsigned: usize
     pointer *: const char
 
 @unsafe
-private func curl_set_long(handle *: const char, option: int32, value: int32) int32:
+private func curl_set_long(handle: usize, option: int32, value: int32) int32:
     argument: CurlLongArgument
     argument.value = value
-    return curl_easy_setopt(handle, option, argument.pointer)
+    return Platform.curl_easy_setopt(handle, option, argument.pointer)
 
 
 @unsafe
@@ -454,25 +369,27 @@ public func https_get_to_file(
     if timeout_ms < 1:
         return NET_TIMEOUT
 
-    handle *: const char = curl_easy_init()
-    if handle == Null:
+    handle: usize = Platform.curl_easy_init()
+    if handle == 0:
         return NET_CONNECTION
 
-    output *: const char = fopen($destination[0], "wb")
-    if output == Null:
-        curl_easy_cleanup(handle)
+    output: usize = Platform.fopen($destination[0], "wb")
+    if output == 0:
+        Platform.curl_easy_cleanup(handle)
         return NET_FILE
 
-    if curl_easy_setopt(handle, CURLOPT_URL, $source[0]) != 0 || curl_easy_setopt(handle, CURLOPT_WRITEDATA, output) != 0 || curl_set_long(handle, CURLOPT_NOSIGNAL, 1) != 0 || curl_set_long(handle, CURLOPT_TIMEOUT_MS, timeout_ms) != 0 || curl_set_long(handle, CURLOPT_CONNECTTIMEOUT_MS, timeout_ms) != 0:
-        fclose(output)
-        curl_easy_cleanup(handle)
+    output_arg: CurlLongArgument
+    output_arg.unsigned = output
+    if Platform.curl_easy_setopt(handle, CURLOPT_URL, $source[0]) != 0 || Platform.curl_easy_setopt(handle, CURLOPT_WRITEDATA, output_arg.pointer) != 0 || curl_set_long(handle, CURLOPT_NOSIGNAL, 1) != 0 || curl_set_long(handle, CURLOPT_TIMEOUT_MS, timeout_ms) != 0 || curl_set_long(handle, CURLOPT_CONNECTTIMEOUT_MS, timeout_ms) != 0:
+        Platform.fclose(output)
+        Platform.curl_easy_cleanup(handle)
         return NET_CONNECTION
 
-    result: int32 = curl_easy_perform(handle)
+    result: int32 = Platform.curl_easy_perform(handle)
     status: int64 = 0
-    info_result: int32 = curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, $status)
-    close_result: int32 = fclose(output)
-    curl_easy_cleanup(handle)
+    info_result: int32 = Platform.curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, $status)
+    close_result: int32 = Platform.fclose(output)
+    Platform.curl_easy_cleanup(handle)
     if result == 28:
         return NET_TIMEOUT
     if result != 0:
