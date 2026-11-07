@@ -1,0 +1,19 @@
+; Smoke test for the package produced by scripts/build_lib.py.
+; Install build/net.lib as an available library before compiling.
+#if OS, "windows"
+clause System "windows"
+#elif OS, "linux"
+clause System "linux"
+#else
+clause System "auto"
+#end
+clause Arch "amd"
+library net as Net
+import { HttpClient } from Net
+
+@unsafe
+func main() int32:
+    client: HttpClient = HttpClient(1000, 1, false)
+    if client.set_max_body_bytes(1024) == false:
+        return 1
+    return 0
