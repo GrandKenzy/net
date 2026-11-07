@@ -36,7 +36,10 @@ private struct LocalAddressV6:
     address: byte[16]
     scope_id: uint32
 
-import { input_size, open_input, close_input, read_input, open_input_beneath } from file
+import { input_size, open_input, close_input, read_input } from file
+#if OS, "linux"
+import { open_input_beneath } from file
+#end
 import {
     NET_BACKEND,
     NET_CONNECTION,
