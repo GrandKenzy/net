@@ -88,6 +88,7 @@ public func close_input(handle: usize) void:
 private mold NetFileSizeBits:
     wide: int64
     low: int32
+    unsigned: uint32
 
 @unsafe
 public func open_output(file_name *: const char, result **: void) bool:
@@ -118,19 +119,23 @@ public func input_size(handle *: void) int32:
 public func read_input(handle *: void, buffer *: char, count: int32) int32:
     if count < 0:
         return -1
-    amount: uint32 = count
+    count_bits: NetFileSizeBits
+    count_bits.low = count
+    amount: uint32 = count_bits.unsigned
     got: uint32 = 0
     if Platform.ReadFile(handle, buffer, amount, $got, Null) == 0:
         return -1
     bits: NetFileSizeBits
-    bits.wide = got
+    bits.unsigned = got
     return bits.low
 
 @unsafe
 public func write_output(handle *: void, buffer *: const char, count: int32) bool:
     if count < 0:
         return false
-    amount: uint32 = count
+    count_bits: NetFileSizeBits
+    count_bits.low = count
+    amount: uint32 = count_bits.unsigned
     sent: uint32 = 0
     if Platform.WriteFile(handle, buffer, amount, $sent, Null) == 0:
         return false
