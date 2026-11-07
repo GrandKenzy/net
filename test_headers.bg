@@ -1,0 +1,49 @@
+; HTTP/1.1 framing regression tests. Exit code 0 means all checks pass.
+#if OS, "windows"
+clause System "windows"
+#elif OS, "linux"
+clause System "linux"
+#else
+clause System "auto"
+#end
+clause Arch "amd"
+library string as String
+import { parse_framing } from headers
+
+@unsafe
+func expect_framing(input: chain, expected_mode: int32, expected_length: int32) bool:
+    header: char[512]
+    i: usize = 0
+    while i < 511 && input[i] != 0:
+        header[i] = input[i]
+        i += 1
+    header[i] = "\0"
+    length: int32 = -1
+    mode: int32 = parse_framing(header, $length)
+    return mode == expected_mode && length == expected_length
+
+@unsafe
+func main() int32:
+    if not expect_framing("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", 1, 5):
+        return 1
+    if not expect_framing("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n", 2, -1):
+        return 2
+    if not expect_framing("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", 1, 0):
+        return 3
+    if not expect_framing("HTTP/1.1 200 OK\r\nX-Test: value\r\n\r\n", 0, -1):
+        return 4
+    if not expect_framing("HTTP/1.1 200 OK\r\nX-Debug: chunked\r\n\r\n", 0, -1):
+        return 5
+    if not expect_framing("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\n", -1, 5):
+        return 6
+    if not expect_framing("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n", -1, 5):
+        return 7
+    if not expect_framing("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n", -1, -1):
+        return 8
+    if not expect_framing("HTTP/1.1 200 OK\r\nContent-Length: 12bad\r\n\r\n", -1, -1):
+        return 9
+    if not expect_framing("HTTP/1.1 200 OK\r\nContent-Length : 12\r\n\r\n", -1, -1):
+        return 10
+    if not expect_framing("HTTP/1.1 200 OK\nContent-Length: 3\n\n", -1, -1):
+        return 11
+    return 0
