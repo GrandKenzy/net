@@ -416,7 +416,7 @@ private func open_listener(server *: HttpServer) usize:
         if server_socket == Platform.INVALID_SOCKET:
             Platform.Cleanup()
             return Platform.INVALID_SOCKET
-        if Platform.Bind(server_socket, $local_address_v6, 28) != 0 || Platform.Listen(server_socket, 16) != 0:
+        if Platform.ReuseAddress(server_socket) == false || if Platform.Bind(server_socket, $local_address_v6, 28) != 0 || Platform.Listen(server_socket, 16) != 0:
             Platform.Close(server_socket)
             Platform.Cleanup()
             return Platform.INVALID_SOCKET
@@ -441,7 +441,7 @@ private func open_listener(server *: HttpServer) usize:
     if server_socket == Platform.INVALID_SOCKET:
         Platform.Cleanup()
         return Platform.INVALID_SOCKET
-    if Platform.Bind(server_socket, $local_address, 16) != 0 || Platform.Listen(server_socket, 16) != 0:
+    if Platform.ReuseAddress(server_socket) == false || if Platform.Bind(server_socket, $local_address, 16) != 0 || Platform.Listen(server_socket, 16) != 0:
         Platform.Close(server_socket)
         Platform.Cleanup()
         return Platform.INVALID_SOCKET
