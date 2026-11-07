@@ -32,6 +32,7 @@ import {
     NET_FILE,
     NET_HEADER,
     NET_INVALID_ARGUMENT,
+    NET_LIMIT,
     NET_OK,
     NET_PROTOCOL,
     NET_RECEIVE,
@@ -262,13 +263,14 @@ private func http_get_to_file(
     destination_length: Len_t,
     destination_size: Size_t,
     timeout_ms: int32,
+    max_body_bytes: int32,
     method: int32,
     write_body: bool,
     redirect *: char
 ) int32:
     if url_format(source) != 0:
         return -1
-    if source_size != 1 || destination_size != 1 || (method != 0 && method != 1):
+    if source_size != 1 || destination_size != 1 || (method != 0 && method != 1) || max_body_bytes < 1:
         return -2
 
     ; Evitar leer una URL residual cuando una respuesta 3xx no tenga Location.
@@ -531,6 +533,10 @@ private func http_get_to_file(
                 net_cleanup()
                 return NET_HEADER
             chunked = framing == 2
+            if body_length > max_body_bytes:
+                net_close(socket_handle)
+                net_cleanup()
+                return NET_LIMIT
             if write_body == false:
                 response_initialized = true
                 download_complete = true
@@ -592,6 +598,11 @@ private func http_get_to_file(
                         chunk_remaining = chunk_value
                         chunk_state = 2
                 elif chunk_state == 2:
+                    if body_received >= max_body_bytes:
+                        close_output(output_handle)
+                        net_close(socket_handle)
+                        net_cleanup()
+                        return NET_LIMIT
                     output_buffer[output_length] = current
                     output_length += 1
                     body_received += 1
@@ -643,6 +654,11 @@ private func http_get_to_file(
             if body_length >= 0 && body_received >= body_length:
                 download_complete = true
                 break
+            if body_received >= max_body_bytes:
+                close_output(output_handle)
+                net_close(socket_handle)
+                net_cleanup()
+                return NET_LIMIT
             output_buffer[output_length] = read_buffer[read_index]
             output_length += 1
             body_received += 1
@@ -703,6 +719,15 @@ public class HttpClient:
         self.timeout_ms = timeout_ms
         self.max_redirects = max_redirects
         self.follow_redirects = follow_redirects
+        ; Downloads are capped by default at 512 MiB.
+        self.max_body_bytes = 536870912
+
+    @unsafe
+    func set_max_body_bytes(limit: int32) bool:
+        if limit < 1:
+            return false
+        self.max_body_bytes = limit
+        return true
 
     @unsafe
     func get_to_file(
@@ -717,7 +742,7 @@ public class HttpClient:
             return -1
         format: int32 = url_format(source)
         if format == 1:
-            return https_get_to_file(source, destination, self.timeout_ms)
+            return https_get_to_file(source, destination, self.timeout_ms, self.max_body_bytes)
         if format != 0:
             return -1
         current_url: char[2048]
@@ -736,10 +761,10 @@ public class HttpClient:
             ; Una redireccion HTTP puede cambiar el esquema a HTTPS.
             current_format: int32 = url_format(current_url)
             if current_format == 1:
-                return https_get_to_file(current_url, destination, self.timeout_ms)
+                return https_get_to_file(current_url, destination, self.timeout_ms, self.max_body_bytes)
             if current_format != 0:
                 return NET_REDIRECT
-            result: int32 = http_get_to_file(current_url, destination, self.timeout_ms, 0, true, $redirect_url[0])
+            result: int32 = http_get_to_file(current_url, destination, self.timeout_ms, self.max_body_bytes, 0, true, $redirect_url[0])
             if result != NET_REDIRECT || self.follow_redirects == false:
                 return result
             if redirects >= self.max_redirects:
@@ -785,7 +810,7 @@ public class HttpClient:
         current_url[current_length] = "\0"
         redirects: int32 = 0
         while true:
-            result: int32 = http_get_to_file(current_url, empty_destination, self.timeout_ms, 1, false, $redirect_url[0])
+            result: int32 = http_get_to_file(current_url, empty_destination, self.timeout_ms, self.max_body_bytes, 1, false, $redirect_url[0])
             if result != NET_REDIRECT || self.follow_redirects == false:
                 return result
             if redirects >= self.max_redirects:
