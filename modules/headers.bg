@@ -1,0 +1,116 @@
+; HTTP/1.1 response framing parser: reject ambiguous message lengths.
+; Returns -1 malformed, 0 EOF framing, 1 Content-Length, 2 chunked.
+
+@unsafe
+private func name_matches(data: char[], length: Len_t, size: Size_t, first: usize, last: usize, expected: chain) bool:
+    index: usize = first
+    word: usize = 0
+    while index < last && expected[word] != 0:
+        if String.char_to_lower(data[index]) != expected[word]:
+            return false
+        index += 1
+        word += 1
+    return index == last && expected[word] == 0
+
+@unsafe
+public func parse_framing(data: char[], length: Len_t, size: Size_t, content_length *: int32) int32:
+    (content_length) = -1
+    if size != 1 || length < 12:
+        return -1
+    cursor: usize = 0
+    status_line: bool = true
+    has_length: bool = false
+    has_transfer: bool = false
+    cr: char = "\r"
+    nl: char = "\n"
+    sp: char = " "
+    tab: char = "\t"
+    colon: char = ":"
+    zero: char = "0"
+    nine: char = "9"
+    choices: chain = "0123456789"
+    expected: chain = "chunked"
+    parsed: int32 = 0
+    digits: int32 = 0
+    digit: int32 = 0
+    lookup: usize = 0
+    token: usize = 0
+    while cursor < length:
+        stop: usize = cursor
+        while stop < length && data[stop] != cr:
+            if data[stop] == nl:
+                return -1
+            stop += 1
+        if stop + 1 >= length || data[stop + 1] != nl:
+            return -1
+        if status_line:
+            if stop == cursor:
+                return -1
+            status_line = false
+        else:
+            if stop == cursor:
+                if has_transfer && has_length:
+                    return -1
+                if has_transfer:
+                    return 2
+                if has_length:
+                    return 1
+                return 0
+            if data[cursor] == sp || data[cursor] == tab:
+                return -1
+            delimiter: usize = cursor
+            while delimiter < stop && data[delimiter] != colon:
+                if data[delimiter] == sp || data[delimiter] == tab:
+                    return -1
+                delimiter += 1
+            if delimiter >= stop || delimiter == cursor:
+                return -1
+            value: usize = delimiter + 1
+            while value < stop && (data[value] == sp || data[value] == tab):
+                value += 1
+            if name_matches(data, cursor, delimiter, "content-length"):
+                if has_length:
+                    return -1
+                has_length = true
+                if value >= stop:
+                    return -1
+                parsed = 0
+                digits = 0
+                while value < stop && data[value] >= zero && data[value] <= nine:
+                    digit = 0
+                    lookup = 0
+                    while lookup < 10:
+                        if data[value] == choices[lookup]:
+                            break
+                        lookup += 1
+                        digit += 1
+                    if parsed > 214748364 || (parsed == 214748364 && digit > 7):
+                        return -1
+                    parsed = parsed * 10 + digit
+                    digits += 1
+                    value += 1
+                if digits == 0:
+                    return -1
+                while value < stop && (data[value] == sp || data[value] == tab):
+                    value += 1
+                if value != stop:
+                    return -1
+                (content_length) = parsed
+            elif name_matches(data, cursor, delimiter, "transfer-encoding"):
+                if has_transfer:
+                    return -1
+                has_transfer = true
+                token = 0
+                while token < 7 && value < stop:
+                    if String.char_to_lower(data[value]) != expected[token]:
+                        return -1
+                    value += 1
+                    token += 1
+                if token != 7:
+                    return -1
+                while value < stop && (data[value] == sp || data[value] == tab):
+                    value += 1
+                if value != stop:
+                    return -1
+        cursor = stop + 2
+    return -1
