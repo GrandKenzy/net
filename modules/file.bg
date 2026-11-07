@@ -30,6 +30,19 @@ public func open_input(file_name *: const char, result *: usize) bool:
     (result) = bits.unsigned
     return true
 
+; Returns 0 if the file is safely contained, 404 if absent, or 403 otherwise.
+@unsafe
+public func open_input_beneath(root *: const char, relative *: const char, result *: usize) int32:
+    fd: int64 = Platform.open_read_beneath(root, relative)
+    if fd == -2 || fd == -20:
+        return 404
+    if fd < 0:
+        return 403
+    bits: NetFdBits
+    bits.signed = fd
+    (result) = bits.unsigned
+    return 0
+
 @unsafe
 public func input_size(handle: usize) int32:
     fd: NetFdBits
@@ -64,11 +77,21 @@ public func write_output(handle: usize, buffer *: const char, count: int32) bool
         return false
     fd: NetFdBits
     fd.unsigned = handle
-    size: NetFdBits
-    size.signed = count
-    written: int64 = Platform.write_chars(fd.signed, buffer, size.unsigned)
-    expected: int64 = count
-    return written == expected
+    remaining: int32 = count
+    offset: int32 = 0
+    while remaining > 0:
+        size: NetFdBits
+        size.signed = remaining
+        written: int64 = Platform.write_chars(fd.signed, $buffer[offset], size.unsigned)
+        if written == -4:
+            continue
+        if written <= 0 || written > remaining:
+            return false
+        bounded: NetSmallBits
+        bounded.long = written
+        offset += bounded.small
+        remaining -= bounded.small
+    return true
 
 @unsafe
 public func close_output(handle: usize) void:
@@ -133,13 +156,22 @@ public func read_input(handle *: void, buffer *: char, count: int32) int32:
 public func write_output(handle *: void, buffer *: const char, count: int32) bool:
     if count < 0:
         return false
-    count_bits: NetFileSizeBits
-    count_bits.low = count
-    amount: uint32 = count_bits.unsigned
-    sent: uint32 = 0
-    if Platform.WriteFile(handle, buffer, amount, $sent, Null) == 0:
-        return false
-    return sent == amount
+    remaining: int32 = count
+    offset: int32 = 0
+    while remaining > 0:
+        count_bits: NetFileSizeBits
+        count_bits.low = remaining
+        amount: uint32 = count_bits.unsigned
+        sent: uint32 = 0
+        if Platform.WriteFile(handle, $buffer[offset], amount, $sent, Null) == 0 || sent == 0:
+            return false
+        result: NetFileSizeBits
+        result.unsigned = sent
+        if result.low > remaining || result.low <= 0:
+            return false
+        remaining -= result.low
+        offset += result.low
+    return true
 
 @unsafe
 public func close_output(handle *: void) void:
