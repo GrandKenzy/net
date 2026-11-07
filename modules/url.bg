@@ -22,7 +22,6 @@ clause Arch 'riscv64'
 clause Arch 'auto'
 #end
 
-import { char_to_lower, is_alpha, is_alphanumeric } from string
 
 @unsafe
 public inline func is_url(text: char[], length: Len_t, size: Size_t) bool:
@@ -47,13 +46,13 @@ public inline func is_url(text: char[], length: Len_t, size: Size_t) bool:
         real_length += 1
 
     ; El esquema debe comenzar con una letra y terminar en ':'.
-    if real_length < 4 || is_alpha(text[0]) == false:
+    if real_length < 4 || String.is_alpha(text[0]) == false:
         return false
 
     scheme_end: usize = 1
     while scheme_end < real_length && text[scheme_end] != colon:
         scheme_character: char = text[scheme_end]
-        if is_alphanumeric(scheme_character) == false && scheme_character != plus && scheme_character != hyphen && scheme_character != dot:
+        if String.is_alphanumeric(scheme_character) == false && scheme_character != plus && scheme_character != hyphen && scheme_character != dot:
             return false
         scheme_end += 1
 
@@ -90,14 +89,14 @@ public inline func url_format(text: char[], length: Len_t, size: Size_t) int32:
     f: char = "f"
     colon: char = ":"
 
-    first: char = char_to_lower(text[0])
-    second: char = char_to_lower(text[1])
-    third: char = char_to_lower(text[2])
+    first: char = String.char_to_lower(text[0])
+    second: char = String.char_to_lower(text[1])
+    third: char = String.char_to_lower(text[2])
 
-    if first == h && second == t && third == t && char_to_lower(text[3]) == p:
+    if first == h && second == t && third == t && String.char_to_lower(text[3]) == p:
         if text[4] == colon:
             return 0
-        if char_to_lower(text[4]) == s && text[5] == colon:
+        if String.char_to_lower(text[4]) == s && text[5] == colon:
             return 1
         return -1
 
