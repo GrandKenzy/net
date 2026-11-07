@@ -24,11 +24,6 @@ clause Arch 'riscv64'
 clause Arch 'auto'
 #end
 
-import {
-    char_to_lower,
-    is_digit,
-    parse_uint
-} from string
 import { url_format } from url
 import { https_get_to_file } from https
 import {
@@ -48,72 +43,36 @@ import {
     write_output
 } from file
 
-#if OS, "windows"
-import {
-    ADDRINFO,
-    AF_INET,
-    IPPROTO_TCP,
-    INVALID_SOCKET,
-    SOCK_STREAM,
-    cleanup,
-    close_socket,
-    configure_socket_timeout,
-    connect_socket,
-    open_socket,
-    recv_socket,
-    release_addrinfo,
-    resolve,
-    send_socket,
-    startup
-} from winsock
-#elif OS, "linux"
-import {
-    ADDRINFO,
-    AF_INET,
-    IPPROTO_TCP,
-    INVALID_SOCKET,
-    SOCK_STREAM,
-    cleanup,
-    close_socket,
-    configure_socket_timeout,
-    connect_socket,
-    open_socket,
-    recv_socket,
-    release_addrinfo,
-    resolve,
-    send_socket,
-    startup
-} from linuxsock
-#end
+; Sockets, DNS and timeouts use the canonical platform library.
 
 @unsafe
 private func net_startup() int32:
-    return startup()
+    return Platform.Startup()
 
 @unsafe
 private func net_cleanup() void:
-    cleanup()
+    Platform.Cleanup()
     return
 
 @unsafe
 private func net_socket(family: int32, kind: int32, protocol: int32) usize:
-    return open_socket(family, kind, protocol)
+    return Platform.Open(family, kind, protocol)
 
 @unsafe
 private func net_connect(handle: usize, address *: const char, length: int32) int32:
-    return connect_socket(handle, address, length)
+    return Platform.Connect(handle, address, length)
 
 @unsafe
 private func net_send(handle: usize, buffer *: const char, length: int32) int32:
-    return send_socket(handle, buffer, length)
+    return Platform.Send(handle, buffer, length)
 
 @unsafe
 private func net_recv(handle: usize, buffer *: char, length: int32) int32:
-    return recv_socket(handle, buffer, length)
+    return Platform.Recv(handle, buffer, length)
 
 @unsafe
 private func net_close(handle: usize) void:
-    close_socket(handle)
+    Platform.Close(handle)
     return
 
 @unsafe
@@ -174,7 +133,7 @@ private func header_is_chunked(header: char[], length: Len_t, size: Size_t) bool
     zero: char = "\0"
     index: usize = 0
     while index + 7 <= length && header[index] != zero:
-        if char_to_lower(header[index]) == c && char_to_lower(header[index + 1]) == h && char_to_lower(header[index + 2]) == u && char_to_lower(header[index + 3]) == n && char_to_lower(header[index + 4]) == k && char_to_lower(header[index + 5]) == e && char_to_lower(header[index + 6]) == d:
+        if String.char_to_lower(header[index]) == c && String.char_to_lower(header[index + 1]) == h && String.char_to_lower(header[index + 2]) == u && String.char_to_lower(header[index + 3]) == n && String.char_to_lower(header[index + 4]) == k && String.char_to_lower(header[index + 5]) == e && String.char_to_lower(header[index + 6]) == d:
             return true
         index += 1
     return false
@@ -182,7 +141,7 @@ private func header_is_chunked(header: char[], length: Len_t, size: Size_t) bool
 @unsafe
 private func hex_digit(value: char) int32:
     digits: chain = "0123456789abcdef"
-    lowered: char = char_to_lower(value)
+    lowered: char = String.char_to_lower(value)
     index: int32 = 0
     while index < 16:
         if lowered == digits[index]:
@@ -219,12 +178,12 @@ private func header_content_length(header: char[], length: Len_t, size: Size_t) 
     while index + 15 <= length:
         if header[index] == nul:
             break
-        if (index == 0 || header[index - 1] == newline) && char_to_lower(header[index]) == c && char_to_lower(header[index + 1]) == o && char_to_lower(header[index + 2]) == n && char_to_lower(header[index + 3]) == t && char_to_lower(header[index + 4]) == e && char_to_lower(header[index + 5]) == n && char_to_lower(header[index + 6]) == t && header[index + 7] == dash && char_to_lower(header[index + 8]) == l && char_to_lower(header[index + 9]) == e && char_to_lower(header[index + 10]) == n && char_to_lower(header[index + 11]) == g && char_to_lower(header[index + 12]) == t && char_to_lower(header[index + 13]) == h && header[index + 14] == colon:
+        if (index == 0 || header[index - 1] == newline) && String.char_to_lower(header[index]) == c && String.char_to_lower(header[index + 1]) == o && String.char_to_lower(header[index + 2]) == n && String.char_to_lower(header[index + 3]) == t && String.char_to_lower(header[index + 4]) == e && String.char_to_lower(header[index + 5]) == n && String.char_to_lower(header[index + 6]) == t && header[index + 7] == dash && String.char_to_lower(header[index + 8]) == l && String.char_to_lower(header[index + 9]) == e && String.char_to_lower(header[index + 10]) == n && String.char_to_lower(header[index + 11]) == g && String.char_to_lower(header[index + 12]) == t && String.char_to_lower(header[index + 13]) == h && header[index + 14] == colon:
             value_index: usize = index + 15
             while value_index < length && (header[value_index] == space || header[value_index] == tab):
                 value_index += 1
             digit_count: usize = 0
-            while value_index < length && digit_count < 31 && is_digit(header[value_index]):
+            while value_index < length && digit_count < 31 && String.is_digit(header[value_index]):
                 value_text[digit_count] = header[value_index]
                 digit_count += 1
                 value_index += 1
@@ -232,7 +191,7 @@ private func header_content_length(header: char[], length: Len_t, size: Size_t) 
             if digit_count == 0:
                 return -2
             ; Un campo malformado no se trata como longitud desconocida.
-            if value_index < length && is_digit(header[value_index]):
+            if value_index < length && String.is_digit(header[value_index]):
                 return -2
             while value_index < length && (header[value_index] == space || header[value_index] == tab):
                 value_index += 1
@@ -277,7 +236,7 @@ private func header_location(header: char[], length: Len_t, size: Size_t, output
     zero: char = "\0"
     index: usize = 0
     while index + 9 <= length && header[index] != zero:
-        if char_to_lower(header[index]) == l && char_to_lower(header[index + 1]) == o && char_to_lower(header[index + 2]) == c && char_to_lower(header[index + 3]) == a && char_to_lower(header[index + 4]) == t && char_to_lower(header[index + 5]) == i && char_to_lower(header[index + 6]) == o && char_to_lower(header[index + 7]) == n && header[index + 8] == colon:
+        if String.char_to_lower(header[index]) == l && String.char_to_lower(header[index + 1]) == o && String.char_to_lower(header[index + 2]) == c && String.char_to_lower(header[index + 3]) == a && String.char_to_lower(header[index + 4]) == t && String.char_to_lower(header[index + 5]) == i && String.char_to_lower(header[index + 6]) == o && String.char_to_lower(header[index + 7]) == n && header[index + 8] == colon:
             value_index: usize = index + 9
             while value_index < length && (header[value_index] == space || header[value_index] == tab):
                 value_index += 1
@@ -405,7 +364,7 @@ private func http_get_to_file(
         port_length: usize = 0
         cursor = port_value_start
         while cursor < authority_end:
-            if port_length >= 5 || is_digit(source[cursor]) == false:
+            if port_length >= 5 || String.is_digit(source[cursor]) == false:
                 return -2
             service[port_length] = source[cursor]
             port_length += 1
@@ -413,7 +372,7 @@ private func http_get_to_file(
         if port_length == 0:
             return -2
         service[port_length] = "\0"
-        port_value: usize = parse_uint(service)
+        port_value: usize = String.parse_uint(service)
         if port_value == 0 || port_value > 65535:
             return -2
 
@@ -457,49 +416,8 @@ private func http_get_to_file(
     if startup_result != 0:
         return -4
 
-    hints: ADDRINFO
-    hints.ai_flags = 0
-    ; AF_UNSPEC deja que el backend seleccione IPv4 o IPv6 según el host.
-    hints.ai_family = 0
-    hints.ai_socktype = 1
-    hints.ai_protocol = 6
-    hints.ai_addrlen = 0
-
-    address *: ADDRINFO = Null
-    resolve_result: int32 = resolve(
-        $dns_host[0],
-        $service[0],
-        $hints,
-        $address
-    )
-    if resolve_result != 0:
-        net_cleanup()
-        return -3
-
-    socket_handle: usize = net_socket(
-        (address).ai_family,
-        (address).ai_socktype,
-        (address).ai_protocol
-    )
-    if socket_handle == INVALID_SOCKET:
-        release_addrinfo(address)
-        net_cleanup()
-        return -4
-
-    if configure_socket_timeout(socket_handle, timeout_ms) != 0:
-        net_close(socket_handle)
-        release_addrinfo(address)
-        net_cleanup()
-        return -11
-
-    connect_result: int32 = net_connect(
-        socket_handle,
-        (address).ai_addr,
-        (address).ai_addrlen
-    )
-    release_addrinfo(address)
-    if connect_result != 0:
-        net_close(socket_handle)
+    socket_handle: usize = Platform.OpenTcpHost($dns_host[0], $service[0], timeout_ms)
+    if socket_handle == Platform.INVALID_SOCKET:
         net_cleanup()
         return -4
 
@@ -590,11 +508,11 @@ private func http_get_to_file(
                 net_close(socket_handle)
                 net_cleanup()
                 return NET_HEADER
-            if char_to_lower(header[0]) != status_h || char_to_lower(header[1]) != status_t || char_to_lower(header[2]) != status_t || char_to_lower(header[3]) != status_p || header[8] != status_space:
+            if String.char_to_lower(header[0]) != status_h || String.char_to_lower(header[1]) != status_t || String.char_to_lower(header[2]) != status_t || String.char_to_lower(header[3]) != status_p || header[8] != status_space:
                 net_close(socket_handle)
                 net_cleanup()
                 return NET_PROTOCOL
-            if is_digit(header[9]) == false || is_digit(header[10]) == false || is_digit(header[11]) == false:
+            if String.is_digit(header[9]) == false || String.is_digit(header[10]) == false || String.is_digit(header[11]) == false:
                 net_close(socket_handle)
                 net_cleanup()
                 return NET_PROTOCOL
