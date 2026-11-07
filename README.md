@@ -3,7 +3,7 @@
 Librería de red para el lenguaje Bagron. Incluye un cliente HTTP/HTTPS y un servidor estático local para pruebas y desarrollo.
 
 - Versión de net: 1.0.0
-- Versión compatible de Bagron: 1.0.3
+- Versión mínima de Bagron: 1.1.4
 - Estado: desarrollo activo
 
 ## ¿Qué incluye?
@@ -15,8 +15,8 @@ Librería de red para el lenguaje Bagron. Incluye un cliente HTTP/HTTPS y un ser
 
 ## Requisitos
 
-- Bagron compatible con la versión 1.0.3.
-- En Linux, `libcurl.so.4` debe estar disponible para HTTPS.
+- Bagron 1.1.4 o posterior, con las bibliotecas actuales de BagronLab instaladas.
+- En Linux, `libcurl.so.4` debe estar disponible para HTTPS. Además, `gnulibrary.lib` debe incluir los nuevos enlaces `curl`, `open_cstr`, `read_chars`, `write_chars` y `OpenTcpHost`.
 
 ## Uso rápido
 
@@ -57,6 +57,35 @@ func main() int32:
 - No se recomienda exponer directorios modificables por usuarios no confiables.
 - La validación TLS permanece activa por defecto.
 - El servidor todavía no comprueba si un enlace simbólico o reparse point dentro de la raíz apunta fuera de ella. Utiliza únicamente directorios de confianza.
+
+## ABI nativa compartida
+
+`net` no contiene declaraciones `extern` propias. En sus puntos de entrada importa
+`gnulibrary` para Linux o `windows` para Windows bajo el alias `Platform`.
+Los sockets y la resolución DNS viven en las bibliotecas nativas de BagronLab,
+incluidos sus helpers `OpenTcpHost` y `set_timeout`.
+
+- `gnulibrary/modules/curl.bg`: API de libcurl y operaciones de libc requeridas para HTTPS.
+- `gnulibrary/modules/{files,system,sockets}.bg`: syscalls y TCP para Linux.
+- `windows/modules/winhttp.bg`: API nativa WinHTTP.
+- `windows/modules/kernel32.bg`: `MultiByteToWideChar`.
+- `windows/modules/sockets.bg`: conexión TCP, DNS y Winsock.
+
+Los paquetes `*.lib` anteriores **no contienen estos cambios**: hay que
+regenerarlos e instalarlos desde las fuentes actualizadas de BagronLab.
+La compilación de la biblioteca `windows.lib` debe realizarse en un entorno Windows;
+el empaquetador de Linux puede generar un paquete Windows sin símbolos exportados.
+
+Prueba de humo validada en Linux x86_64 con Bagron 1.1.4:
+
+```sh
+bagron main.bg -o server-net
+bagron client.bg -o client-net
+# Ejecutar server-net en una terminal y client-net en otra.
+# El cliente descarga main.bg desde 127.0.0.1:8000.
+```
+
+Windows y las transferencias HTTPS aún requieren pruebas de integración adicionales.
 
 ## Proyecto relacionado
 
