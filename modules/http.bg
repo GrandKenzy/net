@@ -121,26 +121,6 @@ private func append_chars(
     return cursor
 
 @unsafe
-private func header_is_chunked(header: char[], length: Len_t, size: Size_t) bool:
-    if size != 1:
-        return false
-
-    c: char = "c"
-    h: char = "h"
-    u: char = "u"
-    n: char = "n"
-    k: char = "k"
-    e: char = "e"
-    d: char = "d"
-    zero: char = "\0"
-    index: usize = 0
-    while index + 7 <= length && header[index] != zero:
-        if String.char_to_lower(header[index]) == c && String.char_to_lower(header[index + 1]) == h && String.char_to_lower(header[index + 2]) == u && String.char_to_lower(header[index + 3]) == n && String.char_to_lower(header[index + 4]) == k && String.char_to_lower(header[index + 5]) == e && String.char_to_lower(header[index + 6]) == d:
-            return true
-        index += 1
-    return false
-
-@unsafe
 private func hex_digit(value: char) int32:
     digits: chain = "0123456789abcdef"
     lowered: char = String.char_to_lower(value)
@@ -148,74 +128,6 @@ private func hex_digit(value: char) int32:
     while index < 16:
         if lowered == digits[index]:
             return index
-        index += 1
-    return -1
-
-@unsafe
-private func header_content_length(header: char[], length: Len_t, size: Size_t) int32:
-    if size != 1:
-        return -1
-
-    c: char = "c"
-    h: char = "h"
-    o: char = "o"
-    n: char = "n"
-    t: char = "t"
-    e: char = "e"
-    l: char = "l"
-    dash: char = "-"
-    g: char = "g"
-    colon: char = ":"
-    space: char = " "
-    tab: char = "\t"
-    value_text: char[32]
-    parsed: int32 = 0
-    zero: char = "0"
-    nul: char = "\0"
-    nine: char = "9"
-    digits: chain = "0123456789"
-    newline: char = "\n"
-    carriage_return: char = "\r"
-    index: usize = 0
-    while index + 15 <= length:
-        if header[index] == nul:
-            break
-        if (index == 0 || header[index - 1] == newline) && String.char_to_lower(header[index]) == c && String.char_to_lower(header[index + 1]) == o && String.char_to_lower(header[index + 2]) == n && String.char_to_lower(header[index + 3]) == t && String.char_to_lower(header[index + 4]) == e && String.char_to_lower(header[index + 5]) == n && String.char_to_lower(header[index + 6]) == t && header[index + 7] == dash && String.char_to_lower(header[index + 8]) == l && String.char_to_lower(header[index + 9]) == e && String.char_to_lower(header[index + 10]) == n && String.char_to_lower(header[index + 11]) == g && String.char_to_lower(header[index + 12]) == t && String.char_to_lower(header[index + 13]) == h && header[index + 14] == colon:
-            value_index: usize = index + 15
-            while value_index < length && (header[value_index] == space || header[value_index] == tab):
-                value_index += 1
-            digit_count: usize = 0
-            while value_index < length && digit_count < 31 && String.is_digit(header[value_index]):
-                value_text[digit_count] = header[value_index]
-                digit_count += 1
-                value_index += 1
-            value_text[digit_count] = "\0"
-            if digit_count == 0:
-                return -2
-            ; Un campo malformado no se trata como longitud desconocida.
-            if value_index < length && String.is_digit(header[value_index]):
-                return -2
-            while value_index < length && (header[value_index] == space || header[value_index] == tab):
-                value_index += 1
-            if value_index >= length || header[value_index] != carriage_return:
-                return -2
-            value_index = 0
-            while value_index < digit_count:
-                if value_text[value_index] < zero || value_text[value_index] > nine:
-                    return -1
-                digit_index: usize = 0
-                digit_value: int32 = 0
-                while digit_index < 10:
-                    if value_text[value_index] == digits[digit_index]:
-                        break
-                    digit_index += 1
-                    digit_value += 1
-                ; No permitir overflow de int32 en Content-Length.
-                if parsed > 214748364 || (parsed == 214748364 && digit_value > 7):
-                    return -2
-                parsed = parsed * 10 + digit_value
-                value_index += 1
-            return parsed
         index += 1
     return -1
 
