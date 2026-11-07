@@ -16,5 +16,5 @@ arch = "amd"
 min_bagron = "1.1.4"
 
 [build]
-entry = "main.bg"
+entry = "library.bg"
 modules = "modules"
