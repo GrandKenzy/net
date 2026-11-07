@@ -1,0 +1,22 @@
+name: Net source checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    name: Source checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify net has no duplicate native ABI definitions
+        run: python scripts/check_layout.py
+      - name: Validate Python test/build tooling
+        run: python -m py_compile scripts/check_layout.py scripts/build_lib.py tests/integration_http.py
