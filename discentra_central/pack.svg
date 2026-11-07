@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 350" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0c12" />
+      <stop offset="50%" stop-color="#121520" />
+      <stop offset="100%" stop-color="#06070a" />
+    </linearGradient>
+    <radialGradient id="redGlow" cx="50%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#dc2626" stop-opacity="0.25" />
+      <stop offset="70%" stop-color="#8b0000" stop-opacity="0.05" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#dc2626" stop-opacity="0.2" />
+      <stop offset="50%" stop-color="#f87171" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#fef3c7" stop-opacity="0.3" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="350" fill="url(#bgGrad)" />
+  <rect width="800" height="350" fill="url(#redGlow)" />
+
+  <!-- Network Mesh / Grid Lines -->
+  <g stroke="rgba(255, 255, 255, 0.05)" stroke-width="1">
+    <line x1="0" y1="70" x2="800" y2="70" />
+    <line x1="0" y1="140" x2="800" y2="140" />
+    <line x1="0" y1="210" x2="800" y2="210" />
+    <line x1="0" y1="280" x2="800" y2="280" />
+    <line x1="160" y1="0" x2="160" y2="350" />
+    <line x1="320" y1="0" x2="320" y2="350" />
+    <line x1="480" y1="0" x2="480" y2="350" />
+    <line x1="640" y1="0" x2="640" y2="350" />
+  </g>
+
+  <!-- Network Circuit Constellation -->
+  <g stroke="url(#lineGrad)" stroke-width="2" fill="none">
+    <path d="M 120 180 L 260 120 L 400 170 L 540 100 L 680 180" />
+    <path d="M 260 120 L 320 250 L 480 250 L 540 100" />
+    <path d="M 400 170 L 480 250" />
+  </g>
+
+  <!-- Network Nodes -->
+  <g fill="#0a0c12" stroke="#dc2626" stroke-width="3">
+    <circle cx="120" cy="180" r="8" />
+    <circle cx="260" cy="120" r="10" />
+    <circle cx="400" cy="170" r="12" fill="#8b0000" stroke="#f87171" />
+    <circle cx="540" cy="100" r="10" />
+    <circle cx="680" cy="180" r="8" />
+    <circle cx="320" cy="250" r="7" />
+    <circle cx="480" cy="250" r="7" />
+  </g>
+
+  <g fill="#fef3c7">
+    <circle cx="400" cy="170" r="4" />
+    <circle cx="260" cy="120" r="3" />
+    <circle cx="540" cy="100" r="3" />
+  </g>
+
+  <!-- Title & Subtitle -->
+  <text x="400" y="80" text-anchor="middle" font-family="'Courier New', Courier, monospace" font-size="36" font-weight="900" fill="#ffffff" letter-spacing="4">
+    BAGRON::<tspan fill="#f87171">NET</tspan>
+  </text>
+  <text x="400" y="315" text-anchor="middle" font-family="'Courier New', Courier, monospace" font-size="14" fill="rgba(254, 243, 199, 0.75)" letter-spacing="2">
+    HTTP / HTTPS / SOCKETS / STATIC SERVER
+  </text>
+</svg>

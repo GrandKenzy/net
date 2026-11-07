@@ -1,0 +1,20 @@
+[package]
+name = "net"
+version = "1.0.0"
+kind = "librería"
+format = "lib1"
+description = "Biblioteca HTTP/HTTPS y servidor estático local para Bagron"
+license = "MIT"
+
+[author]
+name = "Discentra Community"
+signature = "sha256:8ba6d879a3f74c7ce65d2fa4cf5353a30aef82c4a53f4211c43af7c3407993c7"
+
+[target]
+system = "all"
+arch = "amd"
+min_bagron = "1.0.3"
+
+[build]
+entry = "main.bg"
+modules = "modules"
