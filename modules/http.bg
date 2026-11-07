@@ -25,6 +25,7 @@ clause Arch 'auto'
 #end
 
 import { url_format } from url
+import { parse_framing } from headers
 import { https_get_to_file } from https
 import {
     NET_CONNECTION,
@@ -524,12 +525,12 @@ private func http_get_to_file(
                         return NET_HEADER
                     return NET_REDIRECT
                 return NET_STATUS
-            chunked = header_is_chunked(header)
-            body_length = header_content_length(header)
-            if body_length == -2:
+            framing: int32 = parse_framing(header, $body_length)
+            if framing < 0:
                 net_close(socket_handle)
                 net_cleanup()
                 return NET_HEADER
+            chunked = framing == 2
             if write_body == false:
                 response_initialized = true
                 download_complete = true
@@ -546,6 +547,8 @@ private func http_get_to_file(
                 return NET_FILE
 #end
             response_initialized = true
+            if chunked == false && body_length == 0:
+                download_complete = true
         elif header_ready == false:
             continue
 
