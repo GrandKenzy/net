@@ -58,3 +58,39 @@ bytes HTTP específicos; no necesita Python como dependencia de la aplicación.
 
 > Estado: lista de pruebas de regresión. La presencia de un caso aquí no
 > significa que se haya ejecutado o aprobado automáticamente.
+
+## Nuevas pruebas automatizadas (Linux x86_64)
+
+Con Bagron 1.1.4 y las bibliotecas portables actualizadas disponibles:
+
+```sh
+bagron test_headers.bg -o build/test-headers
+bagron test_url.bg -o build/test-url
+bagron main.bg -o build/server-net
+bagron client.bg -o build/client-net
+
+./build/test-headers
+./build/test-url
+python3 tests/integration_http.py \
+  --client ./build/client-net \
+  --server ./build/server-net \
+  --headers ./build/test-headers
+```
+
+`test_headers.bg` cubre 11 casos de cabeceras y encuadre HTTP/1.1.
+La prueba de integración abre conexiones **solo en 127.0.0.1:8000**:
+ocho casos de cliente y cuatro casos de servidor, incluyendo symlinks,
+Content-Length contradictorio, chunked y respuestas de tamaño cero.
+El puerto debe estar libre. El exit code HTTP negativo se representa como
+entero sin signo de 8 bits en procesos Linux (por ejemplo NET_HEADER = 248).
+
+`python3 scripts/build_lib.py` genera un `net.lib` sin los `main()` de los
+ejemplos. Tras instalarlo, compila `test_library_import.bg` para verificar
+que HttpClient es importable desde otro proyecto.
+
+**Ámbito:** estas pruebas de ejecución se validaron en Linux x86_64; el
+workflow `source-checks.yml` solo hace comprobaciones estáticas en Windows.
+Para Bagron 1.1.4, el enlazado Linux puede requerir el arreglo local PIC.
+
+**Pendiente:** HTTPS con certificados reales, conexión no bloqueante, Windows
+nativo, limpieza atómica de descargas parciales y controles de concurrencia.
