@@ -235,10 +235,11 @@ private func header_location(header: char[], length: Len_t, size: Size_t, output
     space: char = " "
     tab: char = "\t"
     cr: char = "\r"
+    nl: char = "\n"
     zero: char = "\0"
     index: usize = 0
     while index + 9 <= length && header[index] != zero:
-        if String.char_to_lower(header[index]) == l && String.char_to_lower(header[index + 1]) == o && String.char_to_lower(header[index + 2]) == c && String.char_to_lower(header[index + 3]) == a && String.char_to_lower(header[index + 4]) == t && String.char_to_lower(header[index + 5]) == i && String.char_to_lower(header[index + 6]) == o && String.char_to_lower(header[index + 7]) == n && header[index + 8] == colon:
+        if (index == 0 || header[index - 1] == nl) && String.char_to_lower(header[index]) == l && String.char_to_lower(header[index + 1]) == o && String.char_to_lower(header[index + 2]) == c && String.char_to_lower(header[index + 3]) == a && String.char_to_lower(header[index + 4]) == t && String.char_to_lower(header[index + 5]) == i && String.char_to_lower(header[index + 6]) == o && String.char_to_lower(header[index + 7]) == n && header[index + 8] == colon:
             value_index: usize = index + 9
             while value_index < length && (header[value_index] == space || header[value_index] == tab):
                 value_index += 1
@@ -248,6 +249,8 @@ private func header_location(header: char[], length: Len_t, size: Size_t, output
                 output_length += 1
                 value_index += 1
             output[output_length] = "\0"
+            if value_index >= length || header[value_index] != cr:
+                return -1
             if output_length == 0:
                 return -1
             return output_length
