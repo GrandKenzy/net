@@ -1,198 +1,148 @@
-; Lectura y escritura de archivos para los backends HTTP.
-; Mantiene el ABI nativo fuera de http.bg y https.bg.
+; E/S de archivos HTTP a traves de las bibliotecas nativas de BagronLab.
+; No se declaran externs ni se reutiliza close_socket para ficheros.
 
-#if OS, "windows"
-clause System 'windows'
-#elif OS, "linux"
-clause System 'linux'
-#else
-clause System 'auto'
-#end
+#if OS, "linux"
+private mold NetFdBits:
+    signed: int64
+    unsigned: usize
 
-#if ARCH, "amd"
-clause Arch 'amd'
-#elif ARCH, "x86"
-clause Arch 'x86'
-#elif ARCH, "arm"
-clause Arch 'arm'
-#elif ARCH, "riscv32"
-clause Arch 'riscv32'
-#elif ARCH, "riscv64"
-clause Arch 'riscv64'
-#else
-clause Arch 'auto'
-#end
+private mold NetSmallBits:
+    long: int64
+    small: int32
 
-#if OS, "windows"
-extern windows "kernel32":
-    CreateFileA(
-        file_name *: const char,
-        desired_access: uint32,
-        share_mode: uint32,
-        security_attributes *: void,
-        creation_disposition: uint32,
-        flags_and_attributes: uint32,
-        template_file *: void
-    ) *: void
-    WriteFile(
-        handle *: void,
-        buffer *: const char,
-        bytes: int32,
-        written *: int32,
-        overlapped *: void
-    ) int32
-    ReadFile(
-        handle *: void,
-        buffer *: char,
-        bytes: int32,
-        read *: int32,
-        overlapped *: void
-    ) int32
-    CloseHandle(handle *: void) int32
-    GetFileType(handle *: void) uint32
-    GetFileSize(handle *: void, high *: void) int32
+@unsafe
+public func open_output(file_name *: const char, result *: usize) bool:
+    fd: int64 = Platform.open_cstr(-100, file_name, 577, 420)
+    if fd < 0:
+        return false
+    bits: NetFdBits
+    bits.signed = fd
+    (result) = bits.unsigned
+    return true
+
+@unsafe
+public func open_input(file_name *: const char, result *: usize) bool:
+    fd: int64 = Platform.open_cstr(-100, file_name, 0, 0)
+    if fd < 0:
+        return false
+    bits: NetFdBits
+    bits.signed = fd
+    (result) = bits.unsigned
+    return true
+
+@unsafe
+public func input_size(handle: usize) int32:
+    fd: NetFdBits
+    fd.unsigned = handle
+    end: int64 = Platform.lseek(fd.signed, 0, 2)
+    if end < 0 || end > 2147483647:
+        return -1
+    if Platform.lseek(fd.signed, 0, 0) < 0:
+        return -1
+    result: NetSmallBits
+    result.long = end
+    return result.small
+
+@unsafe
+public func read_input(handle: usize, buffer *: char, count: int32) int32:
+    if count < 0:
+        return -1
+    fd: NetFdBits
+    fd.unsigned = handle
+    size: NetFdBits
+    size.signed = count
+    result: int64 = Platform.read_chars(fd.signed, buffer, size.unsigned)
+    if result < 0 || result > 2147483647:
+        return -1
+    bounded: NetSmallBits
+    bounded.long = result
+    return bounded.small
+
+@unsafe
+public func write_output(handle: usize, buffer *: const char, count: int32) bool:
+    if count < 0:
+        return false
+    fd: NetFdBits
+    fd.unsigned = handle
+    size: NetFdBits
+    size.signed = count
+    written: int64 = Platform.write_chars(fd.signed, buffer, size.unsigned)
+    expected: int64 = count
+    return written == expected
+
+@unsafe
+public func close_output(handle: usize) void:
+    fd: NetFdBits
+    fd.unsigned = handle
+    Platform.close(fd.signed)
+    return
+
+@unsafe
+public func close_input(handle: usize) void:
+    fd: NetFdBits
+    fd.unsigned = handle
+    Platform.close(fd.signed)
+    return
+
+#elif OS, "windows"
+private mold NetFileSizeBits:
+    wide: int64
+    low: int32
 
 @unsafe
 public func open_output(file_name *: const char, result **: void) bool:
-    handle *: void = CreateFileA(
-        file_name,
-        1073741824,
-        3,
-        Null,
-        2,
-        128,
-        Null
-    )
-    if GetFileType(handle) != 1:
+    handle *: void = Platform.CreateFileA(file_name, Platform.GENERIC_WRITE, Platform.FILE_SHARE_READ_WRITE, Null, Platform.CREATE_ALWAYS, Platform.FILE_ATTRIBUTE_NORMAL, Null)
+    if Platform.GetFileType(handle) != Platform.FILE_TYPE_DISK:
         return false
     (result) = handle
     return true
 
 @unsafe
 public func open_input(file_name *: const char, result **: void) bool:
-    handle *: void = CreateFileA(
-        file_name,
-        2147483648,
-        3,
-        Null,
-        3,
-        128,
-        Null
-    )
-    if GetFileType(handle) != 1:
+    handle *: void = Platform.CreateFileA(file_name, Platform.GENERIC_READ, Platform.FILE_SHARE_READ_WRITE, Null, Platform.OPEN_EXISTING, Platform.FILE_ATTRIBUTE_NORMAL, Null)
+    if Platform.GetFileType(handle) != Platform.FILE_TYPE_DISK:
         return false
     (result) = handle
     return true
 
 @unsafe
 public func input_size(handle *: void) int32:
-    low: int32 = GetFileSize(handle, Null)
-    if low < 0:
+    size: int64 = 0
+    if Platform.GetFileSizeEx(handle, $size) == 0 || size < 0 || size > 2147483647:
         return -1
-    return low
+    bits: NetFileSizeBits
+    bits.wide = size
+    return bits.low
 
 @unsafe
 public func read_input(handle *: void, buffer *: char, count: int32) int32:
     if count < 0:
         return -1
-    read: int32 = 0
-    if ReadFile(handle, buffer, count, $read, Null) == 0:
+    amount: uint32 = count
+    got: uint32 = 0
+    if Platform.ReadFile(handle, buffer, amount, $got, Null) == 0:
         return -1
-    return read
+    bits: NetFileSizeBits
+    bits.wide = got
+    return bits.low
 
 @unsafe
 public func write_output(handle *: void, buffer *: const char, count: int32) bool:
     if count < 0:
         return false
-    written: int32 = 0
-    result: int32 = WriteFile(
-        handle,
-        buffer,
-        count,
-        $written,
-        Null
-    )
-    return result != 0 && written == count
+    amount: uint32 = count
+    sent: uint32 = 0
+    if Platform.WriteFile(handle, buffer, amount, $sent, Null) == 0:
+        return false
+    return sent == amount
 
 @unsafe
 public func close_output(handle *: void) void:
-    CloseHandle(handle)
+    Platform.CloseHandle(handle)
     return
 
 @unsafe
 public func close_input(handle *: void) void:
-    CloseHandle(handle)
-    return
-
-#elif OS, "linux"
-import { close_socket } from linuxsock
-
-extern c "c":
-    open(
-        file_name *: const char,
-        open_flags: int32,
-        mode: uint32
-    ) usize
-    write(
-        file_descriptor: usize,
-        buffer *: const char,
-        count: int32
-    ) isize
-    read(
-        file_descriptor: usize,
-        buffer *: char,
-        count: int32
-    ) isize
-    lseek(
-        file_descriptor: usize,
-        offset: isize,
-        whence: int32
-    ) isize
-
-@unsafe
-public func open_output(file_name *: const char, result *: usize) bool:
-    handle: usize = open(file_name, 577, 420)
-    if handle == 4294967295:
-        return false
-    (result) = handle
-    return true
-
-@unsafe
-public func open_input(file_name *: const char, result *: usize) bool:
-    handle: usize = open(file_name, 0, 0)
-    if handle == 4294967295:
-        return false
-    (result) = handle
-    return true
-
-@unsafe
-public func input_size(handle: usize) int32:
-    end: isize = lseek(handle, 0, 2)
-    if end < 0 || end > 2147483647:
-        return -1
-    lseek(handle, 0, 0)
-    return end
-
-@unsafe
-public func read_input(handle: usize, buffer *: char, count: int32) int32:
-    if count < 0:
-        return -1
-    return read(handle, buffer, count)
-
-@unsafe
-public func write_output(handle: usize, buffer *: const char, count: int32) bool:
-    if count < 0:
-        return false
-    written: isize = write(handle, buffer, count)
-    return written == count
-
-@unsafe
-public func close_output(handle: usize) void:
-    close_socket(handle)
-    return
-
-@unsafe
-public func close_input(handle: usize) void:
-    close_socket(handle)
+    Platform.CloseHandle(handle)
     return
 #end
