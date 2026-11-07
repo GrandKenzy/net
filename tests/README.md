@@ -1,16 +1,25 @@
 # Pruebas de Bagron Net
 
 Estas comprobaciones verifican los contratos públicos de net. Los ejemplos
-se compilan con una instalación de Bagron compatible (1.0.3).
+se compilan con una instalación de Bagron compatible (1.1.4 o posterior).
 
 ## Regresiones de URL (Bagron puro)
 
-Compila y ejecuta `tests/test_url.bg`. Su código de salida es `0` si los
+Compila y ejecuta `test_url.bg` desde la raíz del repositorio. El archivo `tests/test_url.bg` conserva los casos originales. El código de salida es `0` si los
 ocho casos pasan, o el número del caso fallido si alguno no coincide.
 
 Casos cubiertos: `http://`, `https://`, `ftp://`, esquemas falsos con
 prefijo `httpx://`, `httpsx://`, `ftpplus://`, separadores inválidos
 y esquemas desconocidos.
+
+Ejemplo de ejecución en Linux x86_64:
+
+```sh
+bagron test_url.bg -o test-url
+./test-url
+```
+
+Verificado: ocho casos, código de salida `0`.
 
 ## Cliente y servidor
 
