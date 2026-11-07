@@ -56,7 +56,9 @@ func main() int32:
 - Este proyecto está diseñado principalmente para desarrollo local.
 - No se recomienda exponer directorios modificables por usuarios no confiables.
 - La validación TLS permanece activa por defecto.
-- El servidor todavía no comprueba si un enlace simbólico o reparse point dentro de la raíz apunta fuera de ella. Utiliza únicamente directorios de confianza.
+- En Linux x86_64, el servidor abre rutas mediante `openat2` con `RESOLVE_BENEATH` y `RESOLVE_NO_SYMLINKS`. Requiere Linux 5.6+; en kernels sin `openat2` la lectura falla de forma segura.
+- En Windows todavía está pendiente la defensa equivalente para reparse points de directorios intermedios. Usa únicamente raíces locales de confianza.
+- El cliente impone un límite de descarga de 512 MiB por defecto; puedes cambiarlo con `client.set_max_body_bytes(n)`. Al producirse un fallo, **el archivo de destino puede quedar parcial**: no lo utilices antes de verificar el resultado.
 
 ## ABI nativa compartida
 
@@ -94,3 +96,47 @@ Windows y las transferencias HTTPS aún requieren pruebas de integración adicio
 ## Pruebas
 
 Consulta [tests/README.md](tests/README.md) para ver las pruebas de regresión y las comprobaciones del cliente y el servidor.
+
+## Empaquetado de la API como lib1
+
+`main.bg` y `client.bg` son ejemplos ejecutables; no deben formar parte del
+paquete de biblioteca. `library.bg` es la entrada pública. Se genera un
+árbol fuente temporal aislado para impedir colisiones del símbolo `main`:
+
+```sh
+python3 scripts/build_lib.py
+bagron verify build/net.lib
+```
+
+Instala `build/net.lib` entre las bibliotecas que puede encontrar Bagron. Un
+proyecto consumidor importa la clase de la biblioteca:
+
+```bg
+library net as Net
+import { HttpClient } from Net
+
+@unsafe
+func main() int32:
+    client: HttpClient = HttpClient(10000, 5, true)
+    client.set_max_body_bytes(67108864)
+    return 0
+```
+
+La biblioteca `net.lib` instalada y las bibliotecas nativas `gnulibrary.lib`,
+`windows.lib` y `string.lib` deben proceder de fuentes compatibles con este
+cambio. Los binarios precompilados anteriores pueden no incluir la API necesaria.
+
+## Pruebas y estado de la release
+
+- `bagron test_url.bg` verifica ocho casos de esquemas URL.
+- `bagron test_headers.bg` verifica once casos de encuadre HTTP.
+- `tests/integration_http.py` prueba cliente y servidor usando loopback, sin
+  acceder a Internet (ver `tests/README.md`).
+- `scripts/check_layout.py` verifica que Net no redeclare ABI nativa; GitHub
+  Actions lo ejecuta en Linux y Windows. **Esto no sustituye pruebas binarias
+  en Windows**, que siguen pendientes.
+- `docs/ROADMAP.md` registra las fases completadas y los bloqueos de Net 1.1.0.
+
+El compilador Bagron 1.1.4 necesita el ajuste local de relocalización PIC en
+Linux para ciertos paquetes. Hasta incorporarlo a la release oficial, la
+compilación y ejecución pueden requerir ese parche del backend LLVM.
